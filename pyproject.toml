@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "missing-methods"
+version = "0.1.0"
+description = "NA-aware PCA/PLS helpers with RV/RV2 similarity scores."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26"]
+authors = [
+    { name = "Kristian" },
+]
+keywords = ["PCA", "PLS", "RV coefficient", "missing data"]
+license = { text = "MIT" }
+
+[project.urls]
+Home = "https://github.com/khliland/missingMethods"
