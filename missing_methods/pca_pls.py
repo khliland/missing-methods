@@ -4,7 +4,23 @@ from .nan_utils import _normalize, _safe_crossprod, _safe_matvec
 
 
 def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
-    """Compute PCA scores/loadings while gracefully handling missing entries."""
+    """Compute PCA scores/loadings while gracefully handling missing entries.
+
+    Args:
+        X: Input data matrix with shape (n_samples, n_features).
+        ncomp: Number of principal components to extract.
+        center: Whether to subtract column means before decomposition.
+        tol: Convergence tolerance for the NIPALS iterations.
+        maxiter: Maximum number of iterations per component.
+
+    Returns:
+        Dictionary containing:
+            scores: Projected samples, shape (n_samples, n_components).
+            loadings: Feature directions, shape (n_features, n_components).
+            explained: Sum of squares captured by each component.
+            means: Column means used for centering (zeros if not centered).
+            residual: Residual matrix after extracting the requested components.
+    """
     X = np.asarray(X, dtype=float)
     mask = ~np.isnan(X)
     if center:
@@ -60,7 +76,28 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
 
 
 def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
-    """Fit NIPALS-style PLS components while ignoring NaNs."""
+    """Fit NIPALS-style PLS components while ignoring NaNs.
+
+    Args:
+        X: Predictor matrix with shape (n_samples, n_features_x).
+        Y: Response matrix with shape (n_samples, n_features_y).
+        ncomp: Number of latent components to compute.
+        center: Whether to center both matrices before fitting.
+        tol: Convergence tolerance for the alternating updates.
+        maxiter: Maximum number of iterations for each component.
+
+    Returns:
+        Dictionary containing:
+            scores: Common scores (t) for the X block.
+            weights: Weights used to compute the X scores.
+            loadings_x: Loadings for the X block.
+            loadings_y: Loadings for the Y block.
+            explained: Sum of squared X scores per component.
+            means_x: Column means of the X block.
+            means_y: Column means of the Y block.
+            residual_x: Residual X matrix after deflation.
+            residual_y: Residual Y matrix after deflation.
+    """
     X = np.asarray(X, dtype=float)
     Y = np.asarray(Y, dtype=float)
     mask_x = ~np.isnan(X)
