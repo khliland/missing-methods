@@ -10,8 +10,22 @@ def _safe_crossprod(mat: np.ndarray, vec: np.ndarray) -> np.ndarray:
 
 
 def _normalize(vec: np.ndarray) -> np.ndarray:
-    norm = np.sqrt(np.nansum(vec * vec))
-    return vec / norm if norm > np.finfo(float).eps else vec
+    arr = np.asarray(vec, dtype=float)
+    eps = np.finfo(float).eps
+    if arr.ndim == 1:
+        norm = np.sqrt(np.nansum(arr * arr))
+        return arr / norm if norm > eps else arr
+    norms = np.sqrt(np.nansum(arr * arr, axis=0))
+    norms_safe = np.where(norms > eps, norms, 1.0)
+    return arr / norms_safe[np.newaxis, :]
+
+
+def _standardize(arr: np.ndarray) -> np.ndarray:
+    arr = np.asarray(arr, dtype=float)
+    means = np.nanmean(arr, axis=0, keepdims=True)
+    stds = np.nanstd(arr, axis=0, ddof=1, keepdims=True)
+    stds = np.where(stds == 0, 1.0, stds)
+    return (arr - means) / stds
 
 
 def _safe_correlation(x: np.ndarray, y: np.ndarray) -> float:
