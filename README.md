@@ -11,7 +11,7 @@ pip install -e .
 Alternatively, install directly from GitHub:
 
 ```bash
-pip install git+https://github.com/khliland/missingMethods.git
+pip install git+https://github.com/khliland/missing-methods.git
 ```
 
 This project requires Python 3.10+ and depends only on `numpy`.
