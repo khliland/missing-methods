@@ -104,12 +104,14 @@ def rv_list(arrays, **rv_kwargs):
         >>> import numpy as np
         >>> from missing_methods import rv_list
         >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
-        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]]) + 0.3 * X
+        >>> Z = np.array([[1.2, 0.9], [0.3, 0.4], [1.1, 1.3]]) + 0.2 * X
         >>> X[1, 0] = np.nan
         >>> Y[2, 0] = np.nan
-        >>> arrays = [X, Y]
+        >>> Z[0, 1] = np.nan
+        >>> arrays = [X, Y, Z]
         >>> rv_list(arrays).shape
-        (2, 2)
+        (3, 3)
     """
     n = len(arrays)
     mat = np.zeros((n, n), dtype=float)
@@ -136,12 +138,14 @@ def rv2_list(arrays, **rv_kwargs):
         >>> import numpy as np
         >>> from missing_methods import rv2_list
         >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
-        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]]) + 0.3 * X
+        >>> Z = np.array([[1.2, 0.9], [0.3, 0.4], [1.1, 1.3]]) + 0.2 * X
         >>> X[1, 0] = np.nan
         >>> Y[2, 0] = np.nan
-        >>> arrays = [X, Y]
+        >>> Z[0, 1] = np.nan
+        >>> arrays = [X, Y, Z]
         >>> rv2_list(arrays).shape
-        (2, 2)
+        (3, 3)
     """
     n = len(arrays)
     mat = np.zeros((n, n), dtype=float)

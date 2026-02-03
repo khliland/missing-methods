@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "missing-methods"
-version = "0.2.0"
-description = "NA-aware PCA/PLS helpers with RV/RV2 similarity scores."
+version = "0.3.0"
+description = "NA-aware PCA/PLS/MFA helpers with RV/RV2 similarity scores."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.26"]
@@ -17,3 +17,6 @@ license = { text = "MIT" }
 
 [project.urls]
 Home = "https://github.com/khliland/missing-methods"
+
+[project.optional-dependencies]
+sklearn = ["scikit-learn>=1.5"]
