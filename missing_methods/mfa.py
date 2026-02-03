@@ -1,6 +1,6 @@
 import numpy as np
 
-from .nan_utils import _safe_correlation
+from .nan_utils import _safe_correlation, _scaled_sumsq
 from .pca_pls import pca
 
 
@@ -36,6 +36,22 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
             total_variance: Global variance of the concatenated, scaled blocks.
             n_samples: Number of samples (rows) across blocks.
             n_features: Total number of concatenated features.
+    Note:
+        Block eigenvalues and the global PCA all use MCAR-adjusted inner products so the MFA block weighting stays consistent with the neutral geometry.
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods import mfa
+        >>> rng = np.random.default_rng(0)
+        >>> X = rng.standard_normal((10, 4))
+        >>> Y = rng.standard_normal((10, 4)) + 0.3 * X
+        >>> Z = rng.standard_normal((10, 4)) + 0.2 * X
+        >>> X[[1, 3, 7], 2] = np.nan
+        >>> Y[[0, 4, 9], 1] = np.nan
+        >>> Z[[5, 6], 0] = np.nan
+        >>> blocks = [X, Y, Z]
+        >>> result = mfa(blocks, ncomp=3)
+        >>> result["scores"].shape
+        (10, 3)
     """
     if not blocks:
         raise ValueError("At least one block must be provided for MFA")
@@ -54,6 +70,7 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         if arr.shape[0] != n_samples:
             raise ValueError("All blocks must have the same number of samples")
 
+    # Scale each block by its dominant eigenvalue before concatenating.
     scaled_blocks = []
     block_means = []
     block_scales = []
@@ -62,6 +79,7 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
     eps = np.finfo(float).eps
 
     for block in prepared:
+        # Scale each block by the inverse square root of its leading eigenvalue (NIPALS-based) to balance variance across blocks.
         local_out = pca(block, ncomp=1, center=center, tol=tol, maxiter=maxiter)
         means = local_out["means"]
         eigenvalue = float(local_out["explained"][0]) if local_out["explained"].size else 0.0
@@ -86,12 +104,14 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
             raise ValueError("ncomp must be positive")
         ncomp = min(ncomp, total_features)
 
+    # Run a single PCA on the fully concatenated dataset for common components.
     global_out = pca(concatenated, ncomp, center=False, tol=tol, maxiter=maxiter)
     scores = global_out["scores"]
     loadings = global_out["loadings"]
     explained = global_out["explained"]
 
-    total_variance = np.nansum(concatenated * concatenated)
+    # Measure total variance using the same scaled sums so the explained ratios stay unbiased.
+    total_variance = _scaled_sumsq(concatenated)
     variance_denom = total_variance if total_variance > eps else eps
     explained_variance = explained / variance_denom
     explained_cumulative = np.cumsum(explained_variance)
@@ -105,6 +125,7 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
 
     block_correlation_loadings = []
     for block_scaled in scaled_blocks:
+        # Compute correlations between each block variable and the joint scores.
         correlations = np.zeros((block_scaled.shape[1], scores.shape[1]), dtype=float)
         for var_idx in range(block_scaled.shape[1]):
             col = block_scaled[:, var_idx]

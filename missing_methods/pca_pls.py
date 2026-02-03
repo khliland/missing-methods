@@ -1,6 +1,6 @@
 import numpy as np
 
-from .nan_utils import _normalize, _safe_crossprod, _safe_matvec
+from .nan_utils import _normalize, _safe_crossprod, _safe_matvec, _scaled_sumsq
 
 
 def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
@@ -20,9 +20,20 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
             explained: Sum of squares captured by each component.
             means: Column means used for centering (zeros if not centered).
             residual: Residual matrix after extracting the requested components.
+    Note:
+        Missing values are assumed MCAR so inner products are scaled by the observed proportions, keeping variance estimates neutral.
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods import pca
+        >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
+        >>> X[1, 0] = np.nan
+        >>> result = pca(X, ncomp=2)
+        >>> result["scores"].shape 
+        (3, 2)
     """
     X = np.asarray(X, dtype=float)
     mask = ~np.isnan(X)
+    # Keep track of valid entries so we only deflate and update observed cells.
     if center:
         means = np.nanmean(X, axis=0)
         means[np.isnan(means)] = 0.0
@@ -30,6 +41,7 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
         means = np.zeros(X.shape[1], dtype=float)
     Xc = X - means
 
+    # Preallocate outputs and keep the residual matrix for iterative deflation.
     scores = np.zeros((X.shape[0], ncomp), dtype=float)
     loadings = np.zeros((X.shape[1], ncomp), dtype=float)
     explained = np.zeros(ncomp, dtype=float)
@@ -38,13 +50,14 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
     for comp in range(ncomp):
         start = residual[:, 0]
         start = np.nan_to_num(start)
+        # Use the first column as an initial guess and compute the orthogonal weight vector.
         w = _normalize(_safe_crossprod(residual, start))
         if not np.any(w):
             break
 
         for _ in range(maxiter):
             t = _safe_matvec(residual, w)
-            tt = np.nansum(t * t)
+            tt = _scaled_sumsq(t)
             if tt <= 0:
                 break
             p = _safe_crossprod(residual, t) / tt
@@ -54,8 +67,9 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
                 break
             w = w_new
 
+        # Extract component once convergence is reached, then deflate.
         t = _safe_matvec(residual, w)
-        tt = np.nansum(t * t)
+        tt = _scaled_sumsq(t)
         if tt <= 0:
             break
         p = _safe_crossprod(residual, t) / tt
@@ -64,6 +78,7 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
         explained[comp] = tt
 
         recon = np.outer(t, p)
+        # Deflate using the same mask to ensure we only subtract observed entries.
         residual[mask] -= recon[mask]
 
     return {
@@ -97,6 +112,19 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
             means_y: Column means of the Y block.
             residual_x: Residual X matrix after deflation.
             residual_y: Residual Y matrix after deflation.
+
+    Note:
+        Cross-products are scaled by the proportion of observed entries (MCAR assumption) so that X and Y stay balanced despite differing missingness.
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods import pls
+        >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
+        >>> Y = np.array([[2.4], [0.6], [2.1]])
+        >>> X[1, 0] = np.nan
+        >>> Y[2, 0] = np.nan
+        >>> result = pls(X, Y, ncomp=2)
+        >>> result["scores"].shape 
+        (3, 2)
     """
     X = np.asarray(X, dtype=float)
     Y = np.asarray(Y, dtype=float)
@@ -113,6 +141,7 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
     Xc = X - means_x
     Yc = Y - means_y
 
+    # Keep track of both X and Y residuals so each block is deflated consistently.
     scores = np.zeros((X.shape[0], ncomp), dtype=float)
     weights = np.zeros((X.shape[1], ncomp), dtype=float)
     loadings_x = np.zeros((X.shape[1], ncomp), dtype=float)
@@ -124,12 +153,13 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
     for comp in range(ncomp):
         u = residual_y[:, 0]
         u = np.nan_to_num(u)
+        # Alternating updates until convergence for current component.
         for _ in range(maxiter):
             w = _normalize(_safe_crossprod(residual_x, u))
             if not np.any(w):
                 break
             t = _safe_matvec(residual_x, w)
-            tt = np.nansum(t * t)
+            tt = _scaled_sumsq(t)
             if tt <= 0:
                 break
             q = _safe_crossprod(residual_y, t)
@@ -143,7 +173,7 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
         if not np.any(w):
             break
         t = _safe_matvec(residual_x, w)
-        tt = np.nansum(t * t)
+        tt = _scaled_sumsq(t)
         if tt <= 0:
             break
         p = _safe_crossprod(residual_x, t) / tt

@@ -16,6 +16,17 @@ def rv(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
 
     Returns:
         RV similarity in [0, 1], computed as the cosine of the Gram matrices.
+    Note:
+        The Gram inner products come from NIPALS outputs with MCAR-based scaling so RV stays comparable across missingness patterns.
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods import rv
+        >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
+        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+        >>> X[1, 0] = np.nan
+        >>> Y[2, 0] = np.nan
+        >>> float(rv(X, Y))
+        0.7327...
     """
     X1 = np.asarray(X1, dtype=float)
     X2 = np.asarray(X2, dtype=float)
@@ -46,6 +57,17 @@ def rv2(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
 
     Returns:
         RV2 similarity, computed after removing diagonal contributions from each Gram matrix.
+    Note:
+        The Gram matrices are built from scaled NIPALS scores assuming MCAR so diagonal-free similarities stay neutral.
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods import rv2
+        >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
+        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+        >>> X[1, 0] = np.nan
+        >>> Y[2, 0] = np.nan
+        >>> float(rv2(X, Y))
+        0.6730...
     """
     X1 = np.asarray(X1, dtype=float)
     X2 = np.asarray(X2, dtype=float)
@@ -76,6 +98,18 @@ def rv_list(arrays, **rv_kwargs):
 
     Returns:
         Symmetric RV similarity matrix of shape (n_blocks, n_blocks).
+    Note:
+        Each entry reuses the scaled RV helper, so the MCAR scaling assumption applies to the whole matrix.
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods import rv_list
+        >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
+        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+        >>> X[1, 0] = np.nan
+        >>> Y[2, 0] = np.nan
+        >>> arrays = [X, Y]
+        >>> rv_list(arrays).shape
+        (2, 2)
     """
     n = len(arrays)
     mat = np.zeros((n, n), dtype=float)
@@ -96,6 +130,18 @@ def rv2_list(arrays, **rv_kwargs):
 
     Returns:
         Symmetric RV2 similarity matrix of shape (n_blocks, n_blocks).
+    Note:
+        Entries reuse the RV2 helper, preserving the MCAR-scaled inner-product geometry.
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods import rv2_list
+        >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
+        >>> Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+        >>> X[1, 0] = np.nan
+        >>> Y[2, 0] = np.nan
+        >>> arrays = [X, Y]
+        >>> rv2_list(arrays).shape
+        (2, 2)
     """
     n = len(arrays)
     mat = np.zeros((n, n), dtype=float)

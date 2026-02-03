@@ -31,3 +31,7 @@ print("RV", mm.rv(X, Y))
 ```
 
 The repository keeps `testing.ipynb` in `examples/` for interactive comparisons against `hoggorm` and missing-data scenarios.
+
+## Neutrality and missingness
+
+All methods internally scale sums-of-squares and inner products by the proportion of observed entries so that the estimated variances/covariances stay unbiased under MCAR (missing completely at random). The same scaled geometry is used across PCA, PLS, MFA, and RV/RV2 so the similarity summaries stay comparable even when datasets have different missingness patterns.
