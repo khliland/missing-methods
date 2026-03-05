@@ -42,18 +42,22 @@ All methods internally scale sums-of-squares and inner products by the proportio
 
 ## Scikit-learn wrappers
 
-For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now also re-exports the Normalizer/StandardScaler wrappers so you can drop them into `Pipeline`s alongside `PCA`/`PLS`.
+For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor` plus the preprocessing transformers so you can drop the MCAR-aware kernel regressor and scalers into `Pipeline`s alongside `PCA`/`PLS`.
 
 ```python
-from missing_methods.sk import pca, pls, Normalizer, StandardScaler
+from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, Normalizer, StandardScaler
 
-estimator = pca(n_components=2)
+estimator = PCA(n_components=2)
 estimator.fit(X)
 scores = estimator.transform(X)
 
-pls_estimator = pls(n_components=2)
+pls_estimator = PLSRegressor(n_components=2)
 pls_estimator.fit(X, Y)
 Y_pred = pls_estimator.predict(X)
+
+kernel_estimator = KernelPLSRegressor(n_components=2)
+kernel_estimator.fit(X, Y)
+Y_pred_kernel = kernel_estimator.predict(X)
 
 normalizer = Normalizer()
 normalized = normalizer.fit_transform(X)

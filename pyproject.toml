@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "missing-methods"
-version = "0.3.0"
+version = "0.4.0"
 description = "NA-aware PCA/PLS/MFA helpers with RV/RV2 similarity scores."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ dependencies = ["numpy>=1.26"]
 authors = [
     { name = "Kristian Hovde Liland" },
 ]
-keywords = ["PCA", "PLS", "RV coefficient", "MFA", "preprocessing", "missing data"]
+keywords = ["PCA", "PLS", "RBF-PLS", "RV coefficient", "MFA", "preprocessing", "missing data"]
 license = { text = "MIT" }
 
 [project.urls]
