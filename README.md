@@ -8,8 +8,8 @@ Included methods are grouped as:
 	Principal Component Analysis (`pca`) and Multiple Factor Analysis (`mfa`)
 - Component-based prediction:  
 	Partial Least Squares (`pls`) and kernel Partial Least Squares (`kernel_pls`)
-- Reqularized classification:  
-	Logistic regression (`logistic`)
+- Classification:  
+	Logistic Regression (`logistic`), Linear Discriminant Analysis (`lda`), and Quadratic Discriminant Analysis (`qda`)
 - Imputation:  
 	Principal Component Analysis-based imputation (`pca_impute`)
 - Similarity metrics:  
@@ -60,6 +60,28 @@ logit = mm.logistic(X_class, y_class, impute_ncomp=1)
 sparse_logit = mm.logistic(X_class, y_class, impute_ncomp=1, l1_penalty=0.05)
 print(logit["probabilities"].shape)  # -> (4,)
 
+lda_result = mm.lda(X_class, y_class, impute_ncomp=1)
+print(lda_result["posterior"].shape)  # -> (4, 2)
+
+qda_result = mm.qda(X_class, y_class, impute_ncomp=1)
+print(qda_result["posterior"].shape)  # -> (4, 2)
+
+boundaries = mm.lda_pairwise_boundaries(lda_result)
+print(len(boundaries))  # -> number of pairwise analytical boundaries
+
+conics = mm.qda_pairwise_conics(qda_result)
+print(len(conics))  # -> number of pairwise conics
+
+class_colors = mm.get_class_colors(len(qda_result["classes"]))
+
+# If class_colors is omitted, plot_lda_regions / plot_qda_regions fall back to
+# mm.DEFAULT_CLASS_COLORS automatically.
+
+# In 2D, draw analytically traced QDA boundary segments
+# (no contour-based pairwise boundary rendering)
+# mm.plot_qda_regions(qda_result)
+# mm.plot_qda_boundary_segments(qda_result)
+
 X_miss = np.array([[1.0, 2.0, 3.0], [4.0, np.nan, 6.0], [7.0, 8.0, 9.0]])
 imputed = mm.pca_impute(X_miss, ncomp=1)
 print(imputed["filled_X"].shape)  # -> (3, 3)
@@ -73,10 +95,10 @@ All methods internally scale sums-of-squares and inner products by the proportio
 
 ## Scikit-learn wrappers
 
-For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor`, `PCAImputer`, `LogisticClassifier`, and the preprocessing transformers so you can drop the MCAR-aware models and scalers into `Pipeline`s alongside `PCA`/`PLS`.
+For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor`, `PCAImputer`, `LogisticClassifier`, `LDAClassifier`, `QDAClassifier`, and the preprocessing transformers so you can drop the MCAR-aware models and scalers into `Pipeline`s alongside `PCA`/`PLS`.
 
 ```python
-from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, PCAImputer, LogisticClassifier, Normalizer, StandardScaler
+from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, PCAImputer, LogisticClassifier, LDAClassifier, QDAClassifier, Normalizer, StandardScaler
 import numpy as np
 
 X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
@@ -110,6 +132,14 @@ class_probabilities = classifier.predict_proba(X_class)
 
 sparse_classifier = LogisticClassifier(impute_ncomp=1, l1_penalty=0.05)
 sparse_classifier.fit(X_class, y_class)
+
+lda_classifier = LDAClassifier(impute_ncomp=1)
+lda_classifier.fit(X_class, y_class)
+lda_probabilities = lda_classifier.predict_proba(X_class)
+
+qda_classifier = QDAClassifier(impute_ncomp=1)
+qda_classifier.fit(X_class, y_class)
+qda_probabilities = qda_classifier.predict_proba(X_class)
 
 imputer = PCAImputer(ncomp=1)
 imputer.fit(X_miss)

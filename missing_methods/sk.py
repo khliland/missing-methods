@@ -8,6 +8,8 @@ from typing import Literal
 from .nan_utils import _safe_matvec, _normalize, _scaled_sumsq, _validate_sample_weight
 from .logistic import logistic as _logistic, _masked_effective_matrix, _sigmoid
 from .impute import pca_impute as _pca_impute, _impute_with_loadings
+from .lda import lda as _lda
+from .qda import qda as _qda
 from .pca_pls import pca as _pca, pls as _pls
 from .kernel import kernel_pls as _kernel_pls, pairwise_rbf
 
@@ -488,6 +490,182 @@ class PCAImputer(_BaseEstimator, _TransformerMixin):
         return _impute_with_loadings(X, self.means_, self.scales_, self.loadings_)
 
 
+class LDAClassifier(_BaseEstimator, _ClassifierMixin):
+    """Linear Discriminant Analysis classifier with PCA-based missing-data support.
+
+    Args:
+        prior: Optional class prior probabilities. If omitted, weighted class
+            frequencies from training data are used.
+        regularization: Non-negative ridge term added to the shared covariance
+            diagonal.
+        impute_ncomp: PCA-imputation component control used before LDA.
+        impute_preprocessing: One of "standardize", "center", or "none".
+        pca_tol: Convergence tolerance for PCA imputation.
+        pca_maxiter: Maximum PCA iterations per component.
+
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods.sk import LDAClassifier
+        >>> X = np.array([[0.1, 1.0], [0.0, 0.9], [1.1, -0.2], [1.0, -0.1]])
+        >>> X[1, 0] = np.nan
+        >>> y = np.array([0, 0, 1, 1])
+        >>> clf = LDAClassifier(impute_ncomp=1)
+        >>> _ = clf.fit(X, y)
+        >>> clf.predict(X).shape
+        (4,)
+    """
+
+    def __init__(
+        self,
+        prior=None,
+        regularization=1e-06,
+        impute_ncomp=0.9,
+        impute_preprocessing="standardize",
+        pca_tol=1e-06,
+        pca_maxiter=1000,
+    ):
+        self.prior = prior
+        self.regularization = regularization
+        self.impute_ncomp = impute_ncomp
+        self.impute_preprocessing = impute_preprocessing
+        self.pca_tol = pca_tol
+        self.pca_maxiter = pca_maxiter
+
+    def fit(self, X, y, sample_weight=None, **fit_params):
+        result = _lda(
+            X,
+            y,
+            prior=self.prior,
+            regularization=self.regularization,
+            impute_ncomp=self.impute_ncomp,
+            impute_preprocessing=self.impute_preprocessing,
+            pca_tol=self.pca_tol,
+            pca_maxiter=self.pca_maxiter,
+            sample_weight=sample_weight,
+        )
+        self.classes_ = result["classes"]
+        self.prior_ = result["prior"]
+        self.means_ = result["means"]
+        self.covariance_ = result["covariance"]
+        self.precision_means_ = result["precision_means"]
+        self.intercept_ = -0.5 * np.sum(self.means_ * self.precision_means_, axis=1) + np.log(self.prior_)
+        self.n_features_in_ = self.means_.shape[1]
+        self.impute_means_ = result["impute_means"]
+        self.impute_scales_ = result["impute_scales"]
+        self.impute_loadings_ = result["impute_loadings"]
+        self.filled_X_ = result["filled_X"]
+        return self
+
+    def decision_function(self, X):
+        if not hasattr(self, "precision_means_"):
+            raise ValueError("LDAClassifier instance is not fitted yet")
+        X = np.asarray(X, dtype=float)
+        if X.ndim != 2:
+            raise ValueError("X must be a 2-D array")
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features but the fitted classifier expects {self.n_features_in_}"
+            )
+        X_filled = _impute_with_loadings(X, self.impute_means_, self.impute_scales_, self.impute_loadings_)
+        return X_filled @ self.precision_means_.T + self.intercept_
+
+    def predict_proba(self, X):
+        scores = self.decision_function(X)
+        scores = scores - np.max(scores, axis=1, keepdims=True)
+        exp_scores = np.exp(scores)
+        return exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
+
+    def predict(self, X):
+        scores = self.decision_function(X)
+        return self.classes_[np.argmax(scores, axis=1)]
+
+
+class QDAClassifier(_BaseEstimator, _ClassifierMixin):
+    """Quadratic Discriminant Analysis classifier with PCA-based imputation.
+
+    Args:
+        prior: Optional class prior probabilities. If omitted, weighted class
+            frequencies from training data are used.
+        regularization: Non-negative ridge term added to each class covariance
+            diagonal.
+        impute_ncomp: PCA-imputation component control used before QDA.
+        impute_preprocessing: One of "standardize", "center", or "none".
+        pca_tol: Convergence tolerance for PCA imputation.
+        pca_maxiter: Maximum PCA iterations per component.
+    """
+
+    def __init__(
+        self,
+        prior=None,
+        regularization=1e-06,
+        impute_ncomp=0.9,
+        impute_preprocessing="standardize",
+        pca_tol=1e-06,
+        pca_maxiter=1000,
+    ):
+        self.prior = prior
+        self.regularization = regularization
+        self.impute_ncomp = impute_ncomp
+        self.impute_preprocessing = impute_preprocessing
+        self.pca_tol = pca_tol
+        self.pca_maxiter = pca_maxiter
+
+    def fit(self, X, y, sample_weight=None, **fit_params):
+        result = _qda(
+            X,
+            y,
+            prior=self.prior,
+            regularization=self.regularization,
+            impute_ncomp=self.impute_ncomp,
+            impute_preprocessing=self.impute_preprocessing,
+            pca_tol=self.pca_tol,
+            pca_maxiter=self.pca_maxiter,
+            sample_weight=sample_weight,
+        )
+        self.classes_ = result["classes"]
+        self.prior_ = result["prior"]
+        self.means_ = result["means"]
+        self.covariances_ = result["covariances"]
+        self.precisions_ = result["precisions"]
+        self.log_dets_ = result["log_dets"]
+        self.n_features_in_ = self.means_.shape[1]
+        self.impute_means_ = result["impute_means"]
+        self.impute_scales_ = result["impute_scales"]
+        self.impute_loadings_ = result["impute_loadings"]
+        self.filled_X_ = result["filled_X"]
+        return self
+
+    def decision_function(self, X):
+        if not hasattr(self, "precisions_"):
+            raise ValueError("QDAClassifier instance is not fitted yet")
+        X = np.asarray(X, dtype=float)
+        if X.ndim != 2:
+            raise ValueError("X must be a 2-D array")
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features but the fitted classifier expects {self.n_features_in_}"
+            )
+
+        X_filled = _impute_with_loadings(X, self.impute_means_, self.impute_scales_, self.impute_loadings_)
+        log_prior = np.log(np.clip(self.prior_, 1e-300, None))
+        scores = np.empty((X_filled.shape[0], self.classes_.size), dtype=float)
+        for k in range(self.classes_.size):
+            xc = X_filled - self.means_[k]
+            quad = np.sum((xc @ self.precisions_[k]) * xc, axis=1)
+            scores[:, k] = -0.5 * quad - 0.5 * self.log_dets_[k] + log_prior[k]
+        return scores
+
+    def predict_proba(self, X):
+        scores = self.decision_function(X)
+        scores = scores - np.max(scores, axis=1, keepdims=True)
+        exp_scores = np.exp(scores)
+        return exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
+
+    def predict(self, X):
+        scores = self.decision_function(X)
+        return self.classes_[np.argmax(scores, axis=1)]
+
+
 class LogisticClassifier(_BaseEstimator, _ClassifierMixin):
     """Hybrid missing-robust binary logistic classifier.
 
@@ -586,6 +764,8 @@ class LogisticClassifier(_BaseEstimator, _ClassifierMixin):
 
 
 logistic = LogisticClassifier
+lda = LDAClassifier
+qda = QDAClassifier
 
 
 __all__ = [
@@ -594,9 +774,13 @@ __all__ = [
     "KernelPLSRegressor",
     "PCAImputer",
     "LogisticClassifier",
+    "LDAClassifier",
+    "QDAClassifier",
     "Normalizer",
     "StandardScaler",
     "pca",
     "pls",
     "logistic",
+    "lda",
+    "qda",
 ]
