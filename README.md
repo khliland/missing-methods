@@ -4,17 +4,17 @@
 
 Included methods are grouped as:
 
-- Decomposition / exploratory:
+- Decomposition / exploratory:  
 	Principal Component Analysis (`pca`) and Multiple Factor Analysis (`mfa`)
-- Component-based prediction:
+- Component-based prediction:  
 	Partial Least Squares (`pls`) and kernel Partial Least Squares (`kernel_pls`)
-- Reqularized classification:
+- Reqularized classification:  
 	Logistic regression (`logistic`)
-- Imputation:
+- Imputation:  
 	Principal Component Analysis-based imputation (`pca_impute`)
-- Similarity metrics:
+- Similarity metrics:  
 	RV and RV2 coefficients (`rv`, `rv2`, `rv_list`, `rv2_list`)
-- Preprocessing utilities:
+- Preprocessing utilities:  
 	functional helpers (`normalize`, `standardize`) and scikit-style transformers (`Normalizer`, `StandardScaler`)
 
 Examples of all implemented methods are found in `examples/examples.ipynb`.
