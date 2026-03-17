@@ -1,9 +1,34 @@
 import numpy as np
 
-from .nan_utils import _normalize, _safe_crossprod, _safe_matvec, _scaled_sumsq
+from .nan_utils import (
+    _normalize,
+    _safe_crossprod,
+    _safe_matvec,
+    _scaled_sumsq,
+    _validate_sample_weight,
+)
 
 
-def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
+def _weighted_column_mean(arr: np.ndarray, sample_weight=None) -> np.ndarray:
+    if sample_weight is None:
+        means = np.nanmean(arr, axis=0)
+        means[np.isnan(means)] = 0.0
+        return means
+    weights = _validate_sample_weight(sample_weight, arr.shape[0])
+    mask = ~np.isnan(arr)
+    weighted_counts = np.nansum(mask * weights[:, np.newaxis], axis=0)
+    weighted_sums = np.nansum(np.where(mask, arr * weights[:, np.newaxis], 0.0), axis=0)
+    means = np.divide(
+        weighted_sums,
+        weighted_counts,
+        out=np.zeros(arr.shape[1], dtype=float),
+        where=weighted_counts > 0,
+    )
+    means[np.isnan(means)] = 0.0
+    return means
+
+
+def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000, sample_weight=None):
     """Compute PCA scores/loadings while gracefully handling missing entries.
 
     Args:
@@ -12,6 +37,7 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
         center: Whether to subtract column means before decomposition.
         tol: Convergence tolerance for the NIPALS iterations.
         maxiter: Maximum number of iterations per component.
+        sample_weight: Optional row weights with shape (n_samples,).
 
     Returns:
         Dictionary containing:
@@ -27,16 +53,20 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
         >>> from missing_methods import pca
         >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
         >>> X[1, 0] = np.nan
-        >>> result = pca(X, ncomp=2)
+        >>> baseline = pca(X, ncomp=2)
+        >>> baseline["scores"].shape
+        (3, 2)
+        >>> weights = np.array([1.0, 0.5, 1.5])
+        >>> result = pca(X, ncomp=2, sample_weight=weights)
         >>> result["scores"].shape 
         (3, 2)
     """
     X = np.asarray(X, dtype=float)
     mask = ~np.isnan(X)
     # Keep track of valid entries so we only deflate and update observed cells.
+    row_weights = _validate_sample_weight(sample_weight, X.shape[0])
     if center:
-        means = np.nanmean(X, axis=0)
-        means[np.isnan(means)] = 0.0
+        means = _weighted_column_mean(X, sample_weight=row_weights)
     else:
         means = np.zeros(X.shape[1], dtype=float)
     Xc = X - means
@@ -51,16 +81,16 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
         start = residual[:, 0]
         start = np.nan_to_num(start)
         # Use the first column as an initial guess and compute the orthogonal weight vector.
-        w = _normalize(_safe_crossprod(residual, start))
+        w = _normalize(_safe_crossprod(residual, start, sample_weight=row_weights))
         if not np.any(w):
             break
 
         for _ in range(maxiter):
             t = _safe_matvec(residual, w)
-            tt = _scaled_sumsq(t)
+            tt = _scaled_sumsq(t, sample_weight=row_weights)
             if tt <= 0:
                 break
-            p = _safe_crossprod(residual, t) / tt
+            p = _safe_crossprod(residual, t, sample_weight=row_weights) / tt
             w_new = _normalize(p)
             if np.nansum((w_new - w) ** 2) < tol ** 2:
                 w = w_new
@@ -69,10 +99,10 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
 
         # Extract component once convergence is reached, then deflate.
         t = _safe_matvec(residual, w)
-        tt = _scaled_sumsq(t)
+        tt = _scaled_sumsq(t, sample_weight=row_weights)
         if tt <= 0:
             break
-        p = _safe_crossprod(residual, t) / tt
+        p = _safe_crossprod(residual, t, sample_weight=row_weights) / tt
         scores[:, comp] = t
         loadings[:, comp] = p
         explained[comp] = tt
@@ -90,7 +120,7 @@ def pca(X, ncomp, center=True, tol=1e-06, maxiter=1000):
     }
 
 
-def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
+def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000, sample_weight=None):
     """Fit NIPALS-style PLS components while ignoring NaNs.
 
     Args:
@@ -100,6 +130,7 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
         center: Whether to center both matrices before fitting.
         tol: Convergence tolerance for the alternating updates.
         maxiter: Maximum number of iterations for each component.
+        sample_weight: Optional row weights with shape (n_samples,).
 
     Returns:
         Dictionary containing:
@@ -122,7 +153,11 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
         >>> Y = np.array([[2.4], [0.6], [2.1]])
         >>> X[1, 0] = np.nan
         >>> Y[2, 0] = np.nan
-        >>> result = pls(X, Y, ncomp=2)
+        >>> baseline = pls(X, Y, ncomp=2)
+        >>> baseline["scores"].shape
+        (3, 2)
+        >>> weights = np.array([1.0, 0.75, 1.25])
+        >>> result = pls(X, Y, ncomp=2, sample_weight=weights)
         >>> result["scores"].shape 
         (3, 2)
     """
@@ -130,11 +165,10 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
     Y = np.asarray(Y, dtype=float)
     mask_x = ~np.isnan(X)
     mask_y = ~np.isnan(Y)
+    row_weights = _validate_sample_weight(sample_weight, X.shape[0])
     if center:
-        means_x = np.nanmean(X, axis=0)
-        means_x[np.isnan(means_x)] = 0.0
-        means_y = np.nanmean(Y, axis=0)
-        means_y[np.isnan(means_y)] = 0.0
+        means_x = _weighted_column_mean(X, sample_weight=row_weights)
+        means_y = _weighted_column_mean(Y, sample_weight=row_weights)
     else:
         means_x = np.zeros(X.shape[1], dtype=float)
         means_y = np.zeros(Y.shape[1], dtype=float)
@@ -143,7 +177,7 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
 
     # Keep track of both X and Y residuals so each block is deflated consistently.
     scores = np.zeros((X.shape[0], ncomp), dtype=float)
-    weights = np.zeros((X.shape[1], ncomp), dtype=float)
+    x_weights = np.zeros((X.shape[1], ncomp), dtype=float)
     loadings_x = np.zeros((X.shape[1], ncomp), dtype=float)
     loadings_y = np.zeros((Y.shape[1], ncomp), dtype=float)
     explained = np.zeros(ncomp, dtype=float)
@@ -155,31 +189,31 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
         u = np.nan_to_num(u)
         # Alternating updates until convergence for current component.
         for _ in range(maxiter):
-            w = _normalize(_safe_crossprod(residual_x, u))
+            w = _normalize(_safe_crossprod(residual_x, u, sample_weight=row_weights))
             if not np.any(w):
                 break
             t = _safe_matvec(residual_x, w)
-            tt = _scaled_sumsq(t)
+            tt = _scaled_sumsq(t, sample_weight=row_weights)
             if tt <= 0:
                 break
-            q = _safe_crossprod(residual_y, t)
+            q = _safe_crossprod(residual_y, t, sample_weight=row_weights)
             q = q / np.sqrt(np.nansum(q * q)) if np.nansum(q * q) > 0 else q
             u_new = _safe_matvec(residual_y, q)
             if np.nansum((u_new - u) ** 2) < tol ** 2:
                 u = u_new
                 break
             u = u_new
-        w = _normalize(_safe_crossprod(residual_x, u))
+        w = _normalize(_safe_crossprod(residual_x, u, sample_weight=row_weights))
         if not np.any(w):
             break
         t = _safe_matvec(residual_x, w)
-        tt = _scaled_sumsq(t)
+        tt = _scaled_sumsq(t, sample_weight=row_weights)
         if tt <= 0:
             break
-        p = _safe_crossprod(residual_x, t) / tt
-        c = _safe_crossprod(residual_y, t) / tt
+        p = _safe_crossprod(residual_x, t, sample_weight=row_weights) / tt
+        c = _safe_crossprod(residual_y, t, sample_weight=row_weights) / tt
         scores[:, comp] = t
-        weights[:, comp] = w
+        x_weights[:, comp] = w
         loadings_x[:, comp] = p
         loadings_y[:, comp] = c
         explained[comp] = tt
@@ -191,7 +225,7 @@ def pls(X, Y, ncomp, center=True, tol=1e-06, maxiter=1000):
 
     return {
         "scores": scores,
-        "weights": weights,
+        "weights": x_weights,
         "loadings_x": loadings_x,
         "loadings_y": loadings_y,
         "explained": explained,

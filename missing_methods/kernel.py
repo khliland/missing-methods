@@ -1,6 +1,7 @@
 import numpy as np
 
-from .pca_pls import pls
+from .nan_utils import _validate_sample_weight
+from .pca_pls import pls, _weighted_column_mean
 
 
 def pairwise_rbf(
@@ -63,6 +64,7 @@ def kernel_pls(
     center=True,
     tol=1e-06,
     maxiter=1000,
+    sample_weight=None,
 ):
     """Fit kernel PLS using an RBF Gram matrix that ignores NaNs.
 
@@ -74,6 +76,7 @@ def kernel_pls(
         center: Whether to center the Y block before fitting.
         tol: Convergence tolerance for alternating updates.
         maxiter: Maximum iterations per component.
+        sample_weight: Optional row weights with shape (n_samples,).
 
     Returns:
         Dictionary matching the `pls` return value with extra keys for the kernel.
@@ -86,11 +89,16 @@ def kernel_pls(
         >>> X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
         >>> Y = np.array([[2.4], [0.6], [2.1]])
         >>> X[1, 0] = np.nan
-        >>> result = kernel_pls(X, Y, ncomp=2)
+        >>> baseline = kernel_pls(X, Y, ncomp=2)
+        >>> baseline["scores"].shape
+        (3, 2)
+        >>> weights = np.array([1.0, 0.5, 1.5])
+        >>> result = kernel_pls(X, Y, ncomp=2, sample_weight=weights)
         >>> result["scores"].shape
         (3, 2)
     """
     X = np.asarray(X, dtype=float)
+    row_weights = _validate_sample_weight(sample_weight, X.shape[0])
     if gamma is None:
         gamma = 1.0 / max(1, X.shape[1])
     K, coverage = _rbf_kernel(X, gamma)
@@ -98,8 +106,7 @@ def kernel_pls(
 
     Y = np.asarray(Y, dtype=float)
     if center:
-        means_y = np.nanmean(Y, axis=0)
-        means_y[np.isnan(means_y)] = 0.0
+        means_y = _weighted_column_mean(Y, sample_weight=row_weights)
     else:
         means_y = np.zeros(Y.shape[1], dtype=float)
     Y_centered = Y - means_y
@@ -111,6 +118,7 @@ def kernel_pls(
         center=False,
         tol=tol,
         maxiter=maxiter,
+        sample_weight=row_weights,
     )
     result["means_y"] = means_y
     result["kernel"] = centered_kernel

@@ -1,10 +1,10 @@
 import numpy as np
 
-from .nan_utils import _safe_correlation, _scaled_sumsq
+from .nan_utils import _safe_correlation, _scaled_sumsq, _validate_sample_weight
 from .pca_pls import pca
 
 
-def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
+def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000, sample_weight=None):
     """Perform multiple factor analysis across aligned blocks while handling NaNs.
 
     Each block is centered (when ``center`` is True), scaled by its first eigenvalue,
@@ -18,6 +18,7 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         center: Whether to center each block before the per-block PCA scaling.
         tol: Convergence tolerance forwarded to the internal PCA calls.
         maxiter: Max number of iterations per PCA component.
+        sample_weight: Optional row weights with shape (n_samples,).
 
     Returns:
         Dictionary containing:
@@ -49,7 +50,11 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         >>> Y[[0, 4, 9], 1] = np.nan
         >>> Z[[5, 6], 0] = np.nan
         >>> blocks = [X, Y, Z]
-        >>> result = mfa(blocks, ncomp=3)
+        >>> baseline = mfa(blocks, ncomp=3)
+        >>> baseline["scores"].shape
+        (10, 3)
+        >>> weights = np.linspace(1.0, 2.0, 10)
+        >>> result = mfa(blocks, ncomp=3, sample_weight=weights)
         >>> result["scores"].shape
         (10, 3)
     """
@@ -66,6 +71,7 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         prepared.append(arr)
 
     n_samples = prepared[0].shape[0]
+    weights = _validate_sample_weight(sample_weight, n_samples)
     for arr in prepared:
         if arr.shape[0] != n_samples:
             raise ValueError("All blocks must have the same number of samples")
@@ -80,7 +86,14 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
 
     for block in prepared:
         # Scale each block by the inverse square root of its leading eigenvalue (NIPALS-based) to balance variance across blocks.
-        local_out = pca(block, ncomp=1, center=center, tol=tol, maxiter=maxiter)
+        local_out = pca(
+            block,
+            ncomp=1,
+            center=center,
+            tol=tol,
+            maxiter=maxiter,
+            sample_weight=weights,
+        )
         means = local_out["means"]
         eigenvalue = float(local_out["explained"][0]) if local_out["explained"].size else 0.0
         centered = block - means
@@ -105,13 +118,20 @@ def mfa(blocks, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         ncomp = min(ncomp, total_features)
 
     # Run a single PCA on the fully concatenated dataset for common components.
-    global_out = pca(concatenated, ncomp, center=False, tol=tol, maxiter=maxiter)
+    global_out = pca(
+        concatenated,
+        ncomp,
+        center=False,
+        tol=tol,
+        maxiter=maxiter,
+        sample_weight=weights,
+    )
     scores = global_out["scores"]
     loadings = global_out["loadings"]
     explained = global_out["explained"]
 
     # Measure total variance using the same scaled sums so the explained ratios stay unbiased.
-    total_variance = _scaled_sumsq(concatenated)
+    total_variance = np.sum(_scaled_sumsq(concatenated, axis=0, sample_weight=weights))
     variance_denom = total_variance if total_variance > eps else eps
     explained_variance = explained / variance_denom
     explained_cumulative = np.cumsum(explained_variance)

@@ -6,6 +6,7 @@ from .rv import rv, rv2, rv_list, rv2_list
 from .preprocessing import standardize, normalize
 from .assessment import missingness_recommendations
 from .kernel import kernel_pls
+from .logistic import logistic
 
 __all__ = [
 	"pca",
@@ -19,4 +20,5 @@ __all__ = [
 	"normalize",
 	"missingness_recommendations",
 	"kernel_pls",
+	"logistic",
 ]

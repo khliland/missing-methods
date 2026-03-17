@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 ALL_METHODS = ("PCA", "PLS", "MFA", "RV", "RV2")
 
@@ -204,3 +205,83 @@ def missingness_recommendations(
     df["severity"] = df["severity"].astype(severity_order)
 
     return df
+
+
+def plot_missing_matrix(X, sort_rows=True, ax=None):
+
+    mask = ~np.isnan(X)
+
+    if sort_rows:
+        order = np.argsort(mask.mean(axis=1))
+        mask = mask[order]
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4))
+
+    ax.imshow(mask, aspect="auto", interpolation="nearest")
+    ax.set_xlabel("Variables")
+    ax.set_ylabel("Samples")
+    ax.set_title("Missingness matrix (observed = white)")
+    ax.set_yticks([])
+
+
+def plot_row_coverage(X, ax=None):
+
+    row_prop = (~np.isnan(X)).mean(axis=1)
+
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    ax.hist(row_prop, bins=20)
+    ax.set_xlabel("Proportion observed per sample")
+    ax.set_ylabel("Count")
+    ax.set_title("Row-wise coverage")
+
+
+def plot_xy_overlap(X, Y, ax=None):
+    import matplotlib.pyplot as plt
+
+    maskX = ~np.isnan(X)
+    maskY = ~np.isnan(Y)
+
+    both = (maskX.any(axis=1) & maskY.any(axis=1)).mean()
+    onlyX = (maskX.any(axis=1) & ~maskY.any(axis=1)).mean()
+    onlyY = (~maskX.any(axis=1) & maskY.any(axis=1)).mean()
+
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    ax.bar(["X & Y", "Only X", "Only Y"], [both, onlyX, onlyY])
+    ax.set_ylabel("Proportion of samples")
+    ax.set_title("Row-wise X–Y overlap")
+
+
+def plot_block_coverage(X, blocks, ax=None):
+
+    cov = []
+    for cols in blocks:
+        cov.append((~np.isnan(X[:, cols])).mean())
+
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    ax.bar(range(len(cov)), cov)
+    ax.set_xlabel("Block")
+    ax.set_ylabel("Proportion observed")
+    ax.set_title("Block-wise coverage (MFA)")
+
+
+def plot_missingness_overview(X, Y=None, blocks=None):
+
+    nplots = 2 + (Y is not None) + (blocks is not None)
+    fig, axes = plt.subplots(1, nplots, figsize=(4*nplots, 4))
+
+    i = 0
+    plot_missing_matrix(X, ax=axes[i]); i += 1
+    plot_row_coverage(X, ax=axes[i]); i += 1
+
+    if Y is not None:
+        plot_xy_overlap(X, Y, ax=axes[i]); i += 1
+    if blocks is not None:
+        plot_block_coverage(X, blocks, ax=axes[i])
+

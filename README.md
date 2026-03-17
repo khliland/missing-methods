@@ -14,7 +14,7 @@ Alternatively, install directly from GitHub:
 pip install git+https://github.com/khliland/missing-methods.git
 ```
 
-This project requires Python 3.10+ and depends only on `numpy` for the core helpers. The scikit-learn estimator wrappers (including the Normalizer/StandardScaler) need `scikit-learn`; install them with
+This project requires Python 3.10+ and depends only on `numpy` for the core helpers. The scikit-learn estimator wrappers plus the hybrid logistic regression warm start need `scikit-learn`; install them with
 
 ```bash
 pip install -e .[sklearn]
@@ -32,6 +32,16 @@ Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
 result = mm.pca(X, ncomp=2)
 print(result["scores"].shape)  # -> (3, 2)
 print("RV", mm.rv(X, Y))
+
+sample_weight = np.array([1.0, 0.75, 1.25])
+weighted_pls = mm.pls(X, Y, ncomp=2, sample_weight=sample_weight)
+weighted_rv = mm.rv(X, Y, sample_weight=sample_weight)
+
+X_class = np.array([[1.2, 0.1], [0.8, np.nan], [-1.1, -0.2], [-0.9, -0.4]])
+y_class = np.array([1, 1, 0, 0])
+logit = mm.logistic(X_class, y_class, impute_ncomp=1)
+sparse_logit = mm.logistic(X_class, y_class, impute_ncomp=1, l1_penalty=0.05)
+print(logit["probabilities"].shape)  # -> (4,)
 ```
 
 A full set of examples for all included functions and scikit-learn wrappers is found in `examples/examples.ipynb`, while development testing against `hoggorm` is found in `examples/development_testing.ipynb`.
@@ -42,22 +52,42 @@ All methods internally scale sums-of-squares and inner products by the proportio
 
 ## Scikit-learn wrappers
 
-For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor` plus the preprocessing transformers so you can drop the MCAR-aware kernel regressor and scalers into `Pipeline`s alongside `PCA`/`PLS`.
+For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor`, `LogisticClassifier`, and the preprocessing transformers so you can drop the MCAR-aware models and scalers into `Pipeline`s alongside `PCA`/`PLS`.
 
 ```python
-from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, Normalizer, StandardScaler
+from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, LogisticClassifier, Normalizer, StandardScaler
+import numpy as np
+
+X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
+Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+X_class = np.array([[1.2, 0.1], [0.8, np.nan], [-1.1, -0.2], [-0.9, -0.4]])
+y_class = np.array([1, 1, 0, 0])
 
 estimator = PCA(n_components=2)
+sample_weight = np.array([1.0, 0.75, 1.25])
 estimator.fit(X)
+scores = estimator.transform(X)
+estimator.fit(X, sample_weight=sample_weight)
 scores = estimator.transform(X)
 
 pls_estimator = PLSRegressor(n_components=2)
 pls_estimator.fit(X, Y)
 Y_pred = pls_estimator.predict(X)
+pls_estimator.fit(X, Y, sample_weight=sample_weight)
+Y_pred = pls_estimator.predict(X)
 
 kernel_estimator = KernelPLSRegressor(n_components=2)
 kernel_estimator.fit(X, Y)
 Y_pred_kernel = kernel_estimator.predict(X)
+kernel_estimator.fit(X, Y, sample_weight=sample_weight)
+Y_pred_kernel = kernel_estimator.predict(X)
+
+classifier = LogisticClassifier(impute_ncomp=1)
+classifier.fit(X_class, y_class)
+class_probabilities = classifier.predict_proba(X_class)
+
+sparse_classifier = LogisticClassifier(impute_ncomp=1, l1_penalty=0.05)
+sparse_classifier.fit(X_class, y_class)
 
 normalizer = Normalizer()
 normalized = normalizer.fit_transform(X)

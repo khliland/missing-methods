@@ -1,9 +1,10 @@
 import numpy as np
 
+from .nan_utils import _validate_sample_weight
 from .pca_pls import pca
 
 
-def rv(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
+def rv(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000, sample_weight=None):
     """Compute the RV coefficient between two datasets using NA-safe PCA.
 
     Args:
@@ -13,6 +14,7 @@ def rv(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         center: Whether to center both blocks before PCA.
         tol: Tolerance used when computing each PCA.
         maxiter: Maximum iterations for each PCA component.
+        sample_weight: Optional row weights with shape (n_samples,).
 
     Returns:
         RV similarity in [0, 1], computed as the cosine of the Gram matrices.
@@ -27,16 +29,21 @@ def rv(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         >>> Y[2, 0] = np.nan
         >>> float(rv(X, Y))
         0.7327...
+        >>> w = np.array([1.0, 0.5, 1.5])
+        >>> float(rv(X, Y, sample_weight=w))
+        0.7327...
     """
     X1 = np.asarray(X1, dtype=float)
     X2 = np.asarray(X2, dtype=float)
+    weights = _validate_sample_weight(sample_weight, X1.shape[0])
     if ncomp is None:
         ncomp = min([X1.shape[0] - 1, X1.shape[1], X2.shape[1]])
-    out1 = pca(X1, ncomp, center=center, tol=tol, maxiter=maxiter)
-    out2 = pca(X2, ncomp, center=center, tol=tol, maxiter=maxiter)
+    out1 = pca(X1, ncomp, center=center, tol=tol, maxiter=maxiter, sample_weight=weights)
+    out2 = pca(X2, ncomp, center=center, tol=tol, maxiter=maxiter, sample_weight=weights)
 
-    Q1 = out1["scores"]
-    Q2 = out2["scores"]
+    root_w = np.sqrt(weights)[:, np.newaxis]
+    Q1 = out1["scores"] * root_w
+    Q2 = out2["scores"] * root_w
     C1 = Q1 @ Q1.T
     C2 = Q2 @ Q2.T
     numerator = np.trace(C1 @ C2)
@@ -44,7 +51,7 @@ def rv(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
     return numerator / denom if denom > 0 else 0.0
 
 
-def rv2(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
+def rv2(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000, sample_weight=None):
     """Compute the RV2 coefficient by zeroing the Gram diagonal.
 
     Args:
@@ -54,6 +61,7 @@ def rv2(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         center: Whether to center both matrices before PCA.
         tol: Convergence tolerance for the PCA routine.
         maxiter: Maximum iterations per component.
+        sample_weight: Optional row weights with shape (n_samples,).
 
     Returns:
         RV2 similarity, computed after removing diagonal contributions from each Gram matrix.
@@ -68,16 +76,21 @@ def rv2(X1, X2, ncomp=None, center=True, tol=1e-06, maxiter=1000):
         >>> Y[2, 0] = np.nan
         >>> float(rv2(X, Y))
         0.6730...
+        >>> w = np.array([1.0, 0.5, 1.5])
+        >>> float(rv2(X, Y, sample_weight=w))
+        0.6730...
     """
     X1 = np.asarray(X1, dtype=float)
     X2 = np.asarray(X2, dtype=float)
+    weights = _validate_sample_weight(sample_weight, X1.shape[0])
     if ncomp is None:
         ncomp = min([X1.shape[0] - 1, X1.shape[1], X2.shape[1]])
-    out1 = pca(X1, ncomp, center=center, tol=tol, maxiter=maxiter)
-    out2 = pca(X2, ncomp, center=center, tol=tol, maxiter=maxiter)
+    out1 = pca(X1, ncomp, center=center, tol=tol, maxiter=maxiter, sample_weight=weights)
+    out2 = pca(X2, ncomp, center=center, tol=tol, maxiter=maxiter, sample_weight=weights)
 
-    Q1 = out1["scores"]
-    Q2 = out2["scores"]
+    root_w = np.sqrt(weights)[:, np.newaxis]
+    Q1 = out1["scores"] * root_w
+    Q2 = out2["scores"] * root_w
     C1 = Q1 @ Q1.T
     C2 = Q2 @ Q2.T
 

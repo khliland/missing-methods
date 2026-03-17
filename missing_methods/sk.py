@@ -5,12 +5,14 @@ from __future__ import annotations
 import numpy as np
 from typing import Literal
 
-from .nan_utils import _safe_matvec, _normalize, _scaled_sumsq
+from .nan_utils import _safe_matvec, _normalize, _scaled_sumsq, _validate_sample_weight
+from .logistic import logistic as _logistic, _masked_effective_matrix, _sigmoid
 from .pca_pls import pca as _pca, pls as _pls
 from .kernel import kernel_pls as _kernel_pls, pairwise_rbf
 
 try:
     from sklearn.base import BaseEstimator as _BaseEstimator
+    from sklearn.base import ClassifierMixin as _ClassifierMixin
     from sklearn.base import RegressorMixin as _RegressorMixin
     from sklearn.base import TransformerMixin as _TransformerMixin
 except ImportError:  # pragma: no cover
@@ -26,6 +28,16 @@ except ImportError:  # pragma: no cover
     class _TransformerMixin:
         def fit_transform(self, X, y=None, **fit_params):
             return self.fit(X, y, **fit_params).transform(X)
+
+    class _ClassifierMixin:
+        def score(self, X, y, sample_weight=None):
+            y_pred = self.predict(X)
+            y = np.asarray(y)
+            correct = y_pred == y
+            if sample_weight is None:
+                return np.mean(correct)
+            weights = np.asarray(sample_weight, dtype=float)
+            return np.average(correct, weights=weights)
 
     class _RegressorMixin:
         def score(self, X, y, sample_weight=None):
@@ -68,6 +80,10 @@ class PCA(_BaseEstimator, _TransformerMixin):
         >>> _ = estimator.fit(X)
         >>> estimator.transform(X).shape
         (3, 2)
+        >>> w = np.array([1.0, 0.5, 1.5])
+        >>> _ = estimator.fit(X, sample_weight=w)
+        >>> estimator.transform(X).shape
+        (3, 2)
     """
 
     def __init__(self, n_components=None, center=True, tol=1e-06, maxiter=1000, ncomp=None):
@@ -78,13 +94,14 @@ class PCA(_BaseEstimator, _TransformerMixin):
         self.tol = tol
         self.maxiter = maxiter
 
-    def fit(self, X, y=None, **fit_params):
+    def fit(self, X, y=None, sample_weight=None, **fit_params):
         result = _pca(
             X,
             ncomp=self.n_components,
             center=self.center,
             tol=self.tol,
             maxiter=self.maxiter,
+            sample_weight=sample_weight,
         )
         self.components_ = result["loadings"]
         self.scores_ = result["scores"]
@@ -142,6 +159,10 @@ class PLSRegressor(_BaseEstimator, _RegressorMixin, _TransformerMixin):
         >>> _ = estimator.fit(X, Y)
         >>> estimator.predict(X).shape
         (3, 1)
+        >>> w = np.array([1.0, 0.5, 1.5])
+        >>> _ = estimator.fit(X, Y, sample_weight=w)
+        >>> estimator.predict(X).shape
+        (3, 1)
     """
 
     def __init__(self, n_components=2, center=True, tol=1e-06, maxiter=1000, ncomp=None):
@@ -152,7 +173,7 @@ class PLSRegressor(_BaseEstimator, _RegressorMixin, _TransformerMixin):
         self.tol = tol
         self.maxiter = maxiter
 
-    def fit(self, X, Y, **fit_params):
+    def fit(self, X, Y, sample_weight=None, **fit_params):
         result = _pls(
             X,
             Y,
@@ -160,6 +181,7 @@ class PLSRegressor(_BaseEstimator, _RegressorMixin, _TransformerMixin):
             center=self.center,
             tol=self.tol,
             maxiter=self.maxiter,
+            sample_weight=sample_weight,
         )
         self.weights_ = result["weights"]
         self.loadings_x_ = result["loadings_x"]
@@ -206,6 +228,10 @@ class Normalizer(_BaseEstimator, _TransformerMixin):
         >>> normalized = normalizer.fit_transform(X)
         >>> normalized.shape
         (2, 2)
+        >>> _ = normalizer.fit(X, sample_weight=np.array([1.0, 2.0]))
+        >>> normalized = normalizer.transform(X)
+        >>> normalized.shape
+        (2, 2)
     """
 
     def __init__(self, norm: Literal["l2"] = "l2"):
@@ -213,14 +239,22 @@ class Normalizer(_BaseEstimator, _TransformerMixin):
             raise ValueError("only 'l2' norm is supported")
         self.norm = norm
 
-    def fit(self, arr: np.ndarray, y=None):
+    def fit(self, arr: np.ndarray, y=None, sample_weight=None):
         arr = np.asarray(arr, dtype=float)
+        if sample_weight is None:
+            self.sample_weight_ = None
+        else:
+            self.sample_weight_ = _validate_sample_weight(sample_weight, arr.shape[0])
         self.n_features_in_ = arr.shape[1] if arr.ndim > 1 else 1
         return self
 
-    def transform(self, arr: np.ndarray) -> np.ndarray:
+    def transform(self, arr: np.ndarray, sample_weight=None) -> np.ndarray:
         arr = np.asarray(arr, dtype=float)
-        return _normalize(arr)
+        weights = sample_weight
+        if weights is None and hasattr(self, "sample_weight_"):
+            if self.sample_weight_ is not None and arr.shape[0] == self.sample_weight_.size:
+                weights = self.sample_weight_
+        return _normalize(arr, sample_weight=weights)
 
 
 class StandardScaler(_BaseEstimator, _TransformerMixin):
@@ -235,19 +269,32 @@ class StandardScaler(_BaseEstimator, _TransformerMixin):
         >>> reconstructed = scaler.inverse_transform(transformed)
         >>> np.allclose(reconstructed, X, equal_nan=True)
         True
+        >>> _ = scaler.fit(X, sample_weight=np.array([1.0, 2.0]))
+        >>> transformed = scaler.transform(X)
+        >>> reconstructed = scaler.inverse_transform(transformed)
+        >>> np.allclose(reconstructed, X, equal_nan=True)
+        True
     """
 
     def __init__(self, *, scale: bool = True):
         self.scale = scale
 
-    def fit(self, arr: np.ndarray, y=None):
+    def fit(self, arr: np.ndarray, y=None, sample_weight=None):
         arr = np.asarray(arr, dtype=float)
+        weights = _validate_sample_weight(sample_weight, arr.shape[0])
         self.n_features_in_ = arr.shape[1] if arr.ndim > 1 else 1
-        self.means_ = np.nanmean(arr, axis=0)
+        mask = ~np.isnan(arr)
+        weighted_counts = np.nansum(mask * weights[:, np.newaxis], axis=0)
+        weighted_sums = np.nansum(np.where(mask, arr * weights[:, np.newaxis], 0.0), axis=0)
+        self.means_ = np.divide(
+            weighted_sums,
+            weighted_counts,
+            out=np.zeros(arr.shape[1], dtype=float),
+            where=weighted_counts > 0,
+        )
         residuals = arr - self.means_
-        sumsq = _scaled_sumsq(residuals, axis=0, scale=self.scale)
-        counts = (~np.isnan(arr)).sum(axis=0)
-        denom = np.where(counts > 1, counts - 1, 1.0)
+        sumsq = _scaled_sumsq(residuals, axis=0, scale=self.scale, sample_weight=weights)
+        denom = np.where(weighted_counts > 1, weighted_counts - 1, 1.0)
         variances = sumsq / denom
         stds = np.sqrt(variances)
         stds = np.where(np.isfinite(stds) & (stds != 0), stds, 1.0)
@@ -301,6 +348,10 @@ class KernelPLSRegressor(_BaseEstimator, _RegressorMixin):
         >>> _ = estimator.fit(X, Y)
         >>> estimator.predict(X).shape
         (3, 1)
+        >>> w = np.array([1.0, 0.5, 1.5])
+        >>> _ = estimator.fit(X, Y, sample_weight=w)
+        >>> estimator.predict(X).shape
+        (3, 1)
     """
 
     def __init__(self, n_components=2, gamma=None, center=True, tol=1e-06, maxiter=1000, ncomp=None):
@@ -312,7 +363,7 @@ class KernelPLSRegressor(_BaseEstimator, _RegressorMixin):
         self.tol = tol
         self.maxiter = maxiter
 
-    def fit(self, X, Y, **fit_params):
+    def fit(self, X, Y, sample_weight=None, **fit_params):
         result = _kernel_pls(
             X,
             Y,
@@ -321,6 +372,7 @@ class KernelPLSRegressor(_BaseEstimator, _RegressorMixin):
             center=self.center,
             tol=self.tol,
             maxiter=self.maxiter,
+            sample_weight=sample_weight,
         )
         self.scores_ = result["scores"]
         self.loadings_y_ = result["loadings_y"]
@@ -362,4 +414,114 @@ class KernelPLSRegressor(_BaseEstimator, _RegressorMixin):
         return y_pred + self.means_y_
 
 
-__all__ = ["PCA", "PLSRegressor", "KernelPLSRegressor", "Normalizer", "StandardScaler", "pca", "pls"]
+class LogisticClassifier(_BaseEstimator, _ClassifierMixin):
+    """Hybrid missing-robust binary logistic classifier.
+
+    Args:
+        impute_ncomp: Number of PCA components used for warm-start imputation.
+        impute_preprocessing: One of "standardize", "center", or "none".
+        pca_tol: Convergence tolerance for the PCA imputation stage.
+        pca_maxiter: Maximum PCA iterations per component.
+        warm_start_solver: Dense sklearn solver used on the filled matrix.
+        warm_start_maxiter: Maximum iterations for the warm-start solver.
+        refinement_tol: Convergence tolerance for the masked Newton refinement.
+        refinement_maxiter: Maximum masked refinement iterations.
+        l2_penalty: Ridge penalty for the masked refinement.
+        l1_penalty: Lasso penalty for the masked proximal refinement.
+
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods.sk import LogisticClassifier
+        >>> X = np.array([[1.2, 0.1], [0.8, np.nan], [-1.1, -0.2], [-0.9, -0.4]])
+        >>> y = np.array([1, 1, 0, 0])
+        >>> clf = LogisticClassifier(impute_ncomp=1)
+        >>> _ = clf.fit(X, y)
+        >>> clf.predict(X).shape
+        (4,)
+        >>> w = np.array([1.0, 1.5, 1.0, 0.75])
+        >>> _ = clf.fit(X, y, sample_weight=w)
+        >>> clf.predict_proba(X).shape
+        (4, 2)
+    """
+
+    def __init__(
+        self,
+        impute_ncomp=None,
+        impute_preprocessing="standardize",
+        pca_tol=1e-06,
+        pca_maxiter=1000,
+        warm_start_solver="lbfgs",
+        warm_start_maxiter=1000,
+        refinement_tol=1e-06,
+        refinement_maxiter=50,
+        l2_penalty=1e-06,
+        l1_penalty=0.0,
+    ):
+        self.impute_ncomp = impute_ncomp
+        self.impute_preprocessing = impute_preprocessing
+        self.pca_tol = pca_tol
+        self.pca_maxiter = pca_maxiter
+        self.warm_start_solver = warm_start_solver
+        self.warm_start_maxiter = warm_start_maxiter
+        self.refinement_tol = refinement_tol
+        self.refinement_maxiter = refinement_maxiter
+        self.l2_penalty = l2_penalty
+        self.l1_penalty = l1_penalty
+
+    def fit(self, X, y, sample_weight=None, **fit_params):
+        result = _logistic(
+            X,
+            y,
+            impute_ncomp=self.impute_ncomp,
+            impute_preprocessing=self.impute_preprocessing,
+            pca_tol=self.pca_tol,
+            pca_maxiter=self.pca_maxiter,
+            warm_start_solver=self.warm_start_solver,
+            warm_start_maxiter=self.warm_start_maxiter,
+            refinement_tol=self.refinement_tol,
+            refinement_maxiter=self.refinement_maxiter,
+            l2_penalty=self.l2_penalty,
+            l1_penalty=self.l1_penalty,
+            sample_weight=sample_weight,
+        )
+        self.coef_ = result["coef"][np.newaxis, :]
+        self.intercept_ = np.array([result["intercept"]], dtype=float)
+        self.classes_ = result["classes"]
+        self.n_features_in_ = self.coef_.shape[1]
+        self.n_iter_ = np.array([result["n_iter"]], dtype=int)
+        self.converged_ = result["converged"]
+        self.filled_X_ = result["filled_X"]
+        return self
+
+    def decision_function(self, X):
+        if not hasattr(self, "coef_"):
+            raise ValueError("LogisticClassifier instance is not fitted yet")
+        X = np.asarray(X, dtype=float)
+        Z = _masked_effective_matrix(X)
+        return self.intercept_[0] + Z @ self.coef_[0]
+
+    def predict_proba(self, X):
+        decision = self.decision_function(X)
+        positive = _sigmoid(decision)
+        return np.column_stack([1.0 - positive, positive])
+
+    def predict(self, X):
+        probabilities = self.predict_proba(X)[:, 1]
+        labels = (probabilities >= 0.5).astype(int)
+        return self.classes_[labels]
+
+
+logistic = LogisticClassifier
+
+
+__all__ = [
+    "PCA",
+    "PLSRegressor",
+    "KernelPLSRegressor",
+    "LogisticClassifier",
+    "Normalizer",
+    "StandardScaler",
+    "pca",
+    "pls",
+    "logistic",
+]
