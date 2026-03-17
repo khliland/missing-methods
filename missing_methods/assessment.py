@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 ALL_METHODS = ("PCA", "PLS", "MFA", "RV", "RV2")
 
@@ -208,6 +207,7 @@ def missingness_recommendations(
 
 
 def plot_missing_matrix(X, sort_rows=True, ax=None):
+    import matplotlib.pyplot as plt
 
     mask = ~np.isnan(X)
 
@@ -226,6 +226,7 @@ def plot_missing_matrix(X, sort_rows=True, ax=None):
 
 
 def plot_row_coverage(X, ax=None):
+    import matplotlib.pyplot as plt
 
     row_prop = (~np.isnan(X)).mean(axis=1)
 
@@ -257,6 +258,7 @@ def plot_xy_overlap(X, Y, ax=None):
 
 
 def plot_block_coverage(X, blocks, ax=None):
+    import matplotlib.pyplot as plt
 
     cov = []
     for cols in blocks:
@@ -272,6 +274,7 @@ def plot_block_coverage(X, blocks, ax=None):
 
 
 def plot_missingness_overview(X, Y=None, blocks=None):
+    import matplotlib.pyplot as plt
 
     nplots = 2 + (Y is not None) + (blocks is not None)
     fig, axes = plt.subplots(1, nplots, figsize=(4*nplots, 4))

@@ -1,7 +1,8 @@
 import numpy as np
 
-from .nan_utils import _scaled_sumsq, _validate_sample_weight
-from .pca_pls import _weighted_column_mean, pca
+from .nan_utils import _validate_sample_weight
+from .pca_pls import pca
+from .impute import _preprocess_for_imputation
 
 
 def _sigmoid(arr: np.ndarray) -> np.ndarray:
@@ -25,39 +26,6 @@ def _validate_binary_target(y) -> tuple[np.ndarray, np.ndarray]:
     encoded = (arr == classes[1]).astype(float)
     return encoded, classes
 
-
-def _weighted_column_scale(X: np.ndarray, sample_weight) -> np.ndarray:
-    means = _weighted_column_mean(X, sample_weight=sample_weight)
-    residuals = X - means
-    mask = ~np.isnan(X)
-    weights = _validate_sample_weight(sample_weight, X.shape[0])
-    weighted_counts = np.nansum(mask * weights[:, np.newaxis], axis=0)
-    sumsq = _scaled_sumsq(residuals, axis=0, sample_weight=weights)
-    denom = np.where(weighted_counts > 1, weighted_counts - 1, 1.0)
-    variances = sumsq / denom
-    scales = np.sqrt(variances)
-    scales = np.where(np.isfinite(scales) & (scales > 0), scales, 1.0)
-    return scales
-
-
-def _preprocess_for_imputation(
-    X: np.ndarray,
-    mode: str,
-    sample_weight,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if mode == "standardize":
-        means = _weighted_column_mean(X, sample_weight=sample_weight)
-        scales = _weighted_column_scale(X, sample_weight=sample_weight)
-    elif mode == "center":
-        means = _weighted_column_mean(X, sample_weight=sample_weight)
-        scales = np.ones(X.shape[1], dtype=float)
-    elif mode == "none":
-        means = np.zeros(X.shape[1], dtype=float)
-        scales = np.ones(X.shape[1], dtype=float)
-    else:
-        raise ValueError("impute_preprocessing must be one of: 'standardize', 'center', 'none'")
-    transformed = (X - means) / scales
-    return transformed, means, scales
 
 
 def _masked_effective_matrix(X: np.ndarray) -> np.ndarray:

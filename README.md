@@ -1,6 +1,6 @@
 # missing-methods
 
-`missing-methods` provides NA-aware PCA/PLS/MFA helpers plus RV/RV2 similarity scores that work even when the datasets contain `NaN` entries. It also ships preprocessing helpers (`normalize`, `standardize`) plus scikit-style `Normalizer`/`StandardScaler`, so you can assemble MCAR-aware pipelines. It's a lightweight alternative to full chemometrics toolkits and is suitable for exploratory analysis of paired data matrices.
+`missing-methods` provides NA-aware compression and prediction methods: Principal Component Analysis (PCA), (kernel) Partial Least Squares (PLS), Multiple Factor Analysis (MFA) and Logistic Regression, a PCA based imputer, plus RV/RV2 similarity scores that work even when the datasets contain `NaN` entries. It also ships preprocessing helpers (`normalize`, `standardize`) plus scikit-style `Normalizer`/`StandardScaler`, so you can assemble MCAR-aware pipelines. Examples of use of all implemented methods are found in `examples/examples.ipynb`.
 
 ## Installation
 
@@ -42,6 +42,10 @@ y_class = np.array([1, 1, 0, 0])
 logit = mm.logistic(X_class, y_class, impute_ncomp=1)
 sparse_logit = mm.logistic(X_class, y_class, impute_ncomp=1, l1_penalty=0.05)
 print(logit["probabilities"].shape)  # -> (4,)
+
+X_miss = np.array([[1.0, 2.0, 3.0], [4.0, np.nan, 6.0], [7.0, 8.0, 9.0]])
+imputed = mm.pca_impute(X_miss, ncomp=1)
+print(imputed["filled_X"].shape)  # -> (3, 3)
 ```
 
 A full set of examples for all included functions and scikit-learn wrappers is found in `examples/examples.ipynb`, while development testing against `hoggorm` is found in `examples/development_testing.ipynb`.
@@ -52,14 +56,15 @@ All methods internally scale sums-of-squares and inner products by the proportio
 
 ## Scikit-learn wrappers
 
-For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor`, `LogisticClassifier`, and the preprocessing transformers so you can drop the MCAR-aware models and scalers into `Pipeline`s alongside `PCA`/`PLS`.
+For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor`, `PCAImputer`, `LogisticClassifier`, and the preprocessing transformers so you can drop the MCAR-aware models and scalers into `Pipeline`s alongside `PCA`/`PLS`.
 
 ```python
-from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, LogisticClassifier, Normalizer, StandardScaler
+from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, PCAImputer, LogisticClassifier, Normalizer, StandardScaler
 import numpy as np
 
 X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
 Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
+X_miss = np.array([[1.0, 2.0, 3.0], [4.0, np.nan, 6.0], [7.0, 8.0, 9.0]])
 X_class = np.array([[1.2, 0.1], [0.8, np.nan], [-1.1, -0.2], [-0.9, -0.4]])
 y_class = np.array([1, 1, 0, 0])
 
@@ -88,6 +93,10 @@ class_probabilities = classifier.predict_proba(X_class)
 
 sparse_classifier = LogisticClassifier(impute_ncomp=1, l1_penalty=0.05)
 sparse_classifier.fit(X_class, y_class)
+
+imputer = PCAImputer(ncomp=1)
+imputer.fit(X_miss)
+X_filled = imputer.transform(X_miss)
 
 normalizer = Normalizer()
 normalized = normalizer.fit_transform(X)

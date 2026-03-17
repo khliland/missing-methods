@@ -7,6 +7,7 @@ from typing import Literal
 
 from .nan_utils import _safe_matvec, _normalize, _scaled_sumsq, _validate_sample_weight
 from .logistic import logistic as _logistic, _masked_effective_matrix, _sigmoid
+from .impute import pca_impute as _pca_impute, _impute_with_loadings
 from .pca_pls import pca as _pca, pls as _pls
 from .kernel import kernel_pls as _kernel_pls, pairwise_rbf
 
@@ -414,6 +415,79 @@ class KernelPLSRegressor(_BaseEstimator, _RegressorMixin):
         return y_pred + self.means_y_
 
 
+class PCAImputer(_BaseEstimator, _TransformerMixin):
+    """Scikit-learn style imputer that fills missing values via low-rank PCA reconstruction.
+
+    Fits a MCAR-aware NIPALS PCA on the training matrix. :meth:`transform` then
+    fills NaN positions in any matrix (training or new data) by projecting each
+    row onto the stored loadings using only its observed features, and back-
+    transforming the reconstructed missing cells.
+
+    Args:
+        ncomp: Controls how many PCA components are used.
+
+            - **float in (0, 1)** — minimum components whose cumulative explained
+              variance reaches at least this fraction.  Default is ``0.9`` (90 %).
+            - **int ≥ 1** — exact number of components.
+
+        preprocessing: One of ``"standardize"`` (default), ``"center"``, or
+            ``"none"``. Applied before PCA; inverse applied when filling values.
+        tol: Convergence tolerance forwarded to NIPALS.
+        maxiter: Maximum NIPALS iterations per component.
+
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods.sk import PCAImputer
+        >>> X = np.array([[1.0, 2.0, 3.0], [4.0, np.nan, 6.0], [7.0, 8.0, 9.0]])
+        >>> imputer = PCAImputer(ncomp=1)
+        >>> imputer.fit(X)
+        PCAImputer(ncomp=1)
+        >>> filled = imputer.transform(X)
+        >>> filled.shape
+        (3, 3)
+        >>> np.isnan(filled).any()
+        False
+        >>> w = np.array([1.0, 0.5, 1.5])
+        >>> imputer_w = PCAImputer(ncomp=1)
+        >>> _ = imputer_w.fit(X, sample_weight=w)
+        >>> imputer_w.transform(X).shape
+        (3, 3)
+    """
+
+    def __init__(self, ncomp=0.9, preprocessing="standardize", tol=1e-06, maxiter=1000):
+        self.ncomp = ncomp
+        self.preprocessing = preprocessing
+        self.tol = tol
+        self.maxiter = maxiter
+
+    def fit(self, X, y=None, sample_weight=None, **fit_params):
+        result = _pca_impute(
+            X,
+            ncomp=self.ncomp,
+            preprocessing=self.preprocessing,
+            tol=self.tol,
+            maxiter=self.maxiter,
+            sample_weight=sample_weight,
+        )
+        self.means_ = result["means"]
+        self.scales_ = result["scales"]
+        self.loadings_ = result["loadings"]
+        self.pca_result_ = result["pca_result"]
+        self.ncomp_ = result["ncomp"]
+        self.n_features_in_ = self.loadings_.shape[0]
+        return self
+
+    def transform(self, X, sample_weight=None):
+        if not hasattr(self, "loadings_"):
+            raise ValueError("PCAImputer instance is not fitted yet")
+        X = np.asarray(X, dtype=float)
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features but the fitted imputer expects {self.n_features_in_}"
+            )
+        return _impute_with_loadings(X, self.means_, self.scales_, self.loadings_)
+
+
 class LogisticClassifier(_BaseEstimator, _ClassifierMixin):
     """Hybrid missing-robust binary logistic classifier.
 
@@ -518,6 +592,7 @@ __all__ = [
     "PCA",
     "PLSRegressor",
     "KernelPLSRegressor",
+    "PCAImputer",
     "LogisticClassifier",
     "Normalizer",
     "StandardScaler",

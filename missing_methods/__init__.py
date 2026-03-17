@@ -7,6 +7,7 @@ from .preprocessing import standardize, normalize
 from .assessment import missingness_recommendations
 from .kernel import kernel_pls
 from .logistic import logistic
+from .impute import pca_impute
 
 __all__ = [
 	"pca",
@@ -21,4 +22,5 @@ __all__ = [
 	"missingness_recommendations",
 	"kernel_pls",
 	"logistic",
+	"pca_impute",
 ]
