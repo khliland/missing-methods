@@ -4,12 +4,16 @@
 
 Included methods are grouped as:
 
-- Decomposition and prediction:
-	Principal Component Analysis (`pca`), Partial Least Squares (`pls`), kernel Partial Least Squares (`kernel_pls`), and Multiple Factor Analysis (`mfa`)
-- Classification and imputation:
-	Logistic regression (`logistic`) and Principal Component Analysis-based imputation (`pca_impute`)
+- Decomposition / exploratory:
+	Principal Component Analysis (`pca`) and Multiple Factor Analysis (`mfa`)
+- Component-based prediction:
+	Partial Least Squares (`pls`) and kernel Partial Least Squares (`kernel_pls`)
+- Reqularized classification:
+	Logistic regression (`logistic`)
+- Imputation:
+	Principal Component Analysis-based imputation (`pca_impute`)
 - Similarity metrics:
-	Escoufier RV and RV2 coefficients (`rv`, `rv2`, `rv_list`, `rv2_list`)
+	RV and RV2 coefficients (`rv`, `rv2`, `rv_list`, `rv2_list`)
 - Preprocessing utilities:
 	functional helpers (`normalize`, `standardize`) and scikit-style transformers (`Normalizer`, `StandardScaler`)
 
