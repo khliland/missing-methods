@@ -1,6 +1,19 @@
 # missing-methods
 
-`missing-methods` provides NA-aware compression and prediction methods: Principal Component Analysis (PCA), (kernel) Partial Least Squares (PLS), Multiple Factor Analysis (MFA) and Logistic Regression, a PCA based imputer, plus RV/RV2 similarity scores that work even when the datasets contain `NaN` entries. It also ships preprocessing helpers (`normalize`, `standardize`) plus scikit-style `Normalizer`/`StandardScaler`, so you can assemble MCAR-aware pipelines. Examples of use of all implemented methods are found in `examples/examples.ipynb`.
+`missing-methods` provides NA-aware methods that work even when datasets contain `NaN` entries.
+
+Included methods are grouped as:
+
+- Decomposition and prediction:
+	Principal Component Analysis (`pca`), Partial Least Squares (`pls`), kernel Partial Least Squares (`kernel_pls`), and Multiple Factor Analysis (`mfa`)
+- Classification and imputation:
+	Logistic regression (`logistic`) and Principal Component Analysis-based imputation (`pca_impute`)
+- Similarity metrics:
+	Escoufier RV and RV2 coefficients (`rv`, `rv2`, `rv_list`, `rv2_list`)
+- Preprocessing utilities:
+	functional helpers (`normalize`, `standardize`) and scikit-style transformers (`Normalizer`, `StandardScaler`)
+
+Examples of all implemented methods are found in `examples/examples.ipynb`.
 
 ## Installation
 
