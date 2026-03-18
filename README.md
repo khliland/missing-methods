@@ -17,7 +17,7 @@ Included methods are grouped as:
 - Preprocessing utilities:  
 	functional helpers (`normalize`, `standardize`) and scikit-style transformers (`Normalizer`, `StandardScaler`)
 
-Examples of all implemented methods are found in `examples/examples.ipynb`.
+Minimal examples of all implemented methods are found in `examples/examples.ipynb`, while more elaborate examples are found in `examples/kernel_pls.ipynb` and `examples/UCI_wine.ipynb`.
 
 ## Installation
 

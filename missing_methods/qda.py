@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 from .impute import pca_impute, _impute_with_loadings
@@ -99,6 +101,153 @@ def _unpack_qda_inputs(qda_result_or_means, covariances, prior, classes):
     if classes is None:
         classes = np.arange(means.shape[0])
     return means, covariances, prior, np.asarray(classes)
+
+
+def _fisher_projection_2d_qda(means: np.ndarray, covariances: np.ndarray, prior: np.ndarray) -> np.ndarray:
+    n_features = means.shape[1]
+    if n_features < 2:
+        raise ValueError("At least 2 features are required for 2-D projection")
+
+    prior_safe = np.clip(np.asarray(prior, dtype=float), 0.0, None)
+    prior_sum = float(np.sum(prior_safe))
+    if prior_sum <= 0:
+        prior_safe = np.full(means.shape[0], 1.0 / means.shape[0])
+    else:
+        prior_safe = prior_safe / prior_sum
+
+    global_mean = np.sum(means * prior_safe[:, np.newaxis], axis=0)
+    centered_means = means - global_mean
+    between_cov = (centered_means * prior_safe[:, np.newaxis]).T @ centered_means
+    within_cov = np.einsum("k,kij->ij", prior_safe, covariances)
+
+    fisher_matrix = np.linalg.pinv(within_cov) @ between_cov
+    eigvals, eigvecs = np.linalg.eig(fisher_matrix)
+    order = np.argsort(np.real(eigvals))[::-1]
+    w = np.real(eigvecs[:, order[:2]])
+    q, _ = np.linalg.qr(w)
+    return q[:, :2]
+
+
+def _project_qda_to_2d(
+    means: np.ndarray,
+    covariances: np.ndarray,
+    prior: np.ndarray,
+    *,
+    projection,
+    projection_matrix,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    n_features = means.shape[1]
+
+    if projection_matrix is not None:
+        proj = np.asarray(projection_matrix, dtype=float)
+        if proj.shape != (n_features, 2):
+            raise ValueError("projection_matrix must have shape (n_features, 2)")
+    elif n_features == 2:
+        proj = None
+    else:
+        if projection_matrix is None and projection in (None, "auto"):
+            warnings.warn(
+                "QDA plotting is using an automatic 2-D Fisher projection for n_features > 2; "
+                "decision boundaries can look different from full-space behavior. "
+                "Provide projection_matrix to control which components are shown.",
+                UserWarning,
+                stacklevel=2,
+            )
+        mode = "fisher" if projection in (None, "auto") else projection
+        if mode != "fisher":
+            raise ValueError("projection must be one of {'auto', 'fisher'}")
+        proj = _fisher_projection_2d_qda(means, covariances, prior)
+
+    if proj is None:
+        return means, covariances, None
+
+    means_2d = means @ proj
+    covariances_2d = np.array([proj.T @ c @ proj for c in covariances], dtype=float)
+    return means_2d, covariances_2d, proj
+
+
+def _project_points_to_2d(X: np.ndarray | None, projection_matrix: np.ndarray | None) -> np.ndarray | None:
+    if X is None:
+        return None
+    X_arr = np.asarray(X, dtype=float)
+    if X_arr.ndim != 2:
+        raise ValueError("plot data must have shape (n_samples, n_features)")
+    if projection_matrix is None:
+        if X_arr.shape[1] != 2:
+            raise ValueError("plot data must have 2 columns when no projection is used")
+        return X_arr
+    if X_arr.shape[1] != projection_matrix.shape[0]:
+        raise ValueError("plot data feature count must match projection_matrix")
+    return X_arr @ projection_matrix
+
+
+def _scatter_projected_classes(
+    ax,
+    X: np.ndarray | None,
+    y,
+    classes: np.ndarray,
+    *,
+    projection_matrix: np.ndarray | None,
+    class_colors,
+    marker: str,
+    size: float,
+    alpha: float,
+):
+    if X is None or y is None:
+        return
+
+    X_plot = _project_points_to_2d(X, projection_matrix)
+    if X_plot is None:
+        return
+    y_arr = np.asarray(y)
+    if y_arr.ndim != 1:
+        raise ValueError("plot labels must be a 1-D array")
+    if X_plot.shape[0] != y_arr.shape[0]:
+        raise ValueError("plot data and labels must contain the same number of rows")
+
+    colors = get_class_colors(len(classes), class_colors=class_colors)
+    for idx, cls in enumerate(classes):
+        mask = y_arr == cls
+        if np.any(mask):
+            ax.scatter(
+                X_plot[mask, 0],
+                X_plot[mask, 1],
+                s=size,
+                alpha=alpha,
+                color=colors[idx],
+                marker=marker,
+            )
+
+
+def _resolve_plot_limits(
+    means: np.ndarray,
+    train_X: np.ndarray | None,
+    test_X: np.ndarray | None,
+    projection_matrix: np.ndarray | None,
+    xlim,
+    ylim,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    if xlim is not None and ylim is not None:
+        return (float(xlim[0]), float(xlim[1])), (float(ylim[0]), float(ylim[1]))
+
+    clouds = [means]
+    train_plot = _project_points_to_2d(train_X, projection_matrix)
+    test_plot = _project_points_to_2d(test_X, projection_matrix)
+    if train_plot is not None and train_plot.size:
+        clouds.append(train_plot)
+    if test_plot is not None and test_plot.size:
+        clouds.append(test_plot)
+
+    all_pts = np.vstack(clouds)
+    x0 = float(np.min(all_pts[:, 0]))
+    x1 = float(np.max(all_pts[:, 0]))
+    y0 = float(np.min(all_pts[:, 1]))
+    y1 = float(np.max(all_pts[:, 1]))
+    dx = max(1e-9, x1 - x0)
+    dy = max(1e-9, y1 - y0)
+    xlim_resolved = (x0 - 0.08 * dx, x1 + 0.08 * dx) if xlim is None else (float(xlim[0]), float(xlim[1]))
+    ylim_resolved = (y0 - 0.08 * dy, y1 + 0.08 * dy) if ylim is None else (float(ylim[0]), float(ylim[1]))
+    return xlim_resolved, ylim_resolved
 
 
 def _stable_covariance_inverse(cov: np.ndarray, regularization: float) -> tuple[np.ndarray, float, np.ndarray]:
@@ -585,6 +734,8 @@ def plot_qda_boundary_segments(
     line_kwargs=None,
     dominance_tol=1e-07,
     stitch_tolerance=None,
+    projection="auto",
+    projection_matrix=None,
 ):
     """Plot pairwise QDA boundaries as analytically traced curve segments.
 
@@ -608,14 +759,22 @@ def plot_qda_boundary_segments(
         classes,
     )
 
-    if means.ndim != 2 or means.shape[1] != 2:
-        raise ValueError("plot_qda_boundary_segments requires means with shape (n_classes, 2)")
-    if covariances.shape != (means.shape[0], 2, 2):
-        raise ValueError("plot_qda_boundary_segments requires covariances with shape (n_classes, 2, 2)")
+    if means.ndim != 2:
+        raise ValueError("means must have shape (n_classes, n_features)")
+    if covariances.shape != (means.shape[0], means.shape[1], means.shape[1]):
+        raise ValueError("covariances must have shape (n_classes, n_features, n_features)")
     if prior.shape != (means.shape[0],):
         raise ValueError("prior must have shape (n_classes,)")
     if int(n_samples) < 100:
         raise ValueError("n_samples must be at least 100")
+
+    means, covariances, _ = _project_qda_to_2d(
+        means,
+        covariances,
+        prior,
+        projection=projection,
+        projection_matrix=projection_matrix,
+    )
 
     if ax is None:
         _, ax = plt.subplots()
@@ -714,6 +873,18 @@ def plot_qda_regions(
     draw_pairwise=True,
     line_kwargs=None,
     class_colors=None,
+    projection="auto",
+    projection_matrix=None,
+    train_X=None,
+    train_y=None,
+    test_X=None,
+    test_y=None,
+    train_marker="o",
+    test_marker="x",
+    train_size=18,
+    test_size=30,
+    train_alpha=0.45,
+    test_alpha=0.9,
 ):
     """Plot QDA decision regions with optional pairwise-conic boundary overlays.
 
@@ -737,20 +908,25 @@ def plot_qda_regions(
         classes,
     )
 
-    if means.ndim != 2 or means.shape[1] != 2:
-        raise ValueError("plot_qda_regions requires means with shape (n_classes, 2)")
-    if covariances.shape != (means.shape[0], 2, 2):
-        raise ValueError("plot_qda_regions requires covariances with shape (n_classes, 2, 2)")
+    if means.ndim != 2:
+        raise ValueError("means must have shape (n_classes, n_features)")
+    if covariances.shape != (means.shape[0], means.shape[1], means.shape[1]):
+        raise ValueError("covariances must have shape (n_classes, n_features, n_features)")
     if prior.shape != (means.shape[0],):
         raise ValueError("prior must have shape (n_classes,)")
+
+    means, covariances, proj = _project_qda_to_2d(
+        means,
+        covariances,
+        prior,
+        projection=projection,
+        projection_matrix=projection_matrix,
+    )
 
     if ax is None:
         _, ax = plt.subplots()
 
-    if xlim is None:
-        xlim = ax.get_xlim()
-    if ylim is None:
-        ylim = ax.get_ylim()
+    xlim, ylim = _resolve_plot_limits(means, train_X, test_X, proj, xlim, ylim)
 
     # Build QDA score parameters.
     n_classes = means.shape[0]
@@ -815,6 +991,29 @@ def plot_qda_regions(
                 F_plot = F
 
             ax.contour(XX, YY, F_plot, levels=[0.0], **line_kwargs)
+
+    _scatter_projected_classes(
+        ax,
+        train_X,
+        train_y,
+        classes,
+        projection_matrix=proj,
+        class_colors=class_colors,
+        marker=train_marker,
+        size=float(train_size),
+        alpha=float(train_alpha),
+    )
+    _scatter_projected_classes(
+        ax,
+        test_X,
+        test_y,
+        classes,
+        projection_matrix=proj,
+        class_colors=class_colors,
+        marker=test_marker,
+        size=float(test_size),
+        alpha=float(test_alpha),
+    )
 
     ax.set_xlim(float(xlim[0]), float(xlim[1]))
     ax.set_ylim(float(ylim[0]), float(ylim[1]))

@@ -113,6 +113,144 @@ def _unpack_lda_inputs(lda_result_or_means, covariance, prior, classes):
     return means, covariance, prior, np.asarray(classes)
 
 
+def _fisher_projection_2d(means: np.ndarray, within_cov: np.ndarray, prior: np.ndarray) -> np.ndarray:
+    n_features = means.shape[1]
+    if n_features < 2:
+        raise ValueError("At least 2 features are required for 2-D projection")
+
+    prior_safe = np.clip(np.asarray(prior, dtype=float), 0.0, None)
+    prior_sum = float(np.sum(prior_safe))
+    if prior_sum <= 0:
+        prior_safe = np.full(means.shape[0], 1.0 / means.shape[0])
+    else:
+        prior_safe = prior_safe / prior_sum
+
+    global_mean = np.sum(means * prior_safe[:, np.newaxis], axis=0)
+    centered_means = means - global_mean
+    between_cov = (centered_means * prior_safe[:, np.newaxis]).T @ centered_means
+
+    fisher_matrix = np.linalg.pinv(within_cov) @ between_cov
+    eigvals, eigvecs = np.linalg.eig(fisher_matrix)
+    order = np.argsort(np.real(eigvals))[::-1]
+    w = np.real(eigvecs[:, order[:2]])
+    q, _ = np.linalg.qr(w)
+    return q[:, :2]
+
+
+def _project_lda_to_2d(
+    means: np.ndarray,
+    covariance: np.ndarray,
+    prior: np.ndarray,
+    *,
+    projection,
+    projection_matrix,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    n_features = means.shape[1]
+
+    if projection_matrix is not None:
+        proj = np.asarray(projection_matrix, dtype=float)
+        if proj.shape != (n_features, 2):
+            raise ValueError("projection_matrix must have shape (n_features, 2)")
+    elif n_features == 2:
+        proj = None
+    else:
+        mode = "fisher" if projection in (None, "auto") else projection
+        if mode != "fisher":
+            raise ValueError("projection must be one of {'auto', 'fisher'}")
+        proj = _fisher_projection_2d(means, covariance, prior)
+
+    if proj is None:
+        return means, covariance, None
+
+    means_2d = means @ proj
+    covariance_2d = proj.T @ covariance @ proj
+    return means_2d, covariance_2d, proj
+
+
+def _project_points_to_2d(X: np.ndarray | None, projection_matrix: np.ndarray | None) -> np.ndarray | None:
+    if X is None:
+        return None
+    X_arr = np.asarray(X, dtype=float)
+    if X_arr.ndim != 2:
+        raise ValueError("plot data must have shape (n_samples, n_features)")
+    if projection_matrix is None:
+        if X_arr.shape[1] != 2:
+            raise ValueError("plot data must have 2 columns when no projection is used")
+        return X_arr
+    if X_arr.shape[1] != projection_matrix.shape[0]:
+        raise ValueError("plot data feature count must match projection_matrix")
+    return X_arr @ projection_matrix
+
+
+def _scatter_projected_classes(
+    ax,
+    X: np.ndarray | None,
+    y,
+    classes: np.ndarray,
+    *,
+    projection_matrix: np.ndarray | None,
+    class_colors,
+    marker: str,
+    size: float,
+    alpha: float,
+):
+    if X is None or y is None:
+        return
+
+    X_plot = _project_points_to_2d(X, projection_matrix)
+    if X_plot is None:
+        return
+    y_arr = np.asarray(y)
+    if y_arr.ndim != 1:
+        raise ValueError("plot labels must be a 1-D array")
+    if X_plot.shape[0] != y_arr.shape[0]:
+        raise ValueError("plot data and labels must contain the same number of rows")
+
+    colors = get_class_colors(len(classes), class_colors=class_colors)
+    for idx, cls in enumerate(classes):
+        mask = y_arr == cls
+        if np.any(mask):
+            ax.scatter(
+                X_plot[mask, 0],
+                X_plot[mask, 1],
+                s=size,
+                alpha=alpha,
+                color=colors[idx],
+                marker=marker,
+            )
+
+
+def _resolve_plot_limits(
+    means: np.ndarray,
+    train_X: np.ndarray | None,
+    test_X: np.ndarray | None,
+    projection_matrix: np.ndarray | None,
+    xlim,
+    ylim,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    if xlim is not None and ylim is not None:
+        return (float(xlim[0]), float(xlim[1])), (float(ylim[0]), float(ylim[1]))
+
+    clouds = [means]
+    train_plot = _project_points_to_2d(train_X, projection_matrix)
+    test_plot = _project_points_to_2d(test_X, projection_matrix)
+    if train_plot is not None and train_plot.size:
+        clouds.append(train_plot)
+    if test_plot is not None and test_plot.size:
+        clouds.append(test_plot)
+
+    all_pts = np.vstack(clouds)
+    x0 = float(np.min(all_pts[:, 0]))
+    x1 = float(np.max(all_pts[:, 0]))
+    y0 = float(np.min(all_pts[:, 1]))
+    y1 = float(np.max(all_pts[:, 1]))
+    dx = max(1e-9, x1 - x0)
+    dy = max(1e-9, y1 - y0)
+    xlim_resolved = (x0 - 0.08 * dx, x1 + 0.08 * dx) if xlim is None else (float(xlim[0]), float(xlim[1]))
+    ylim_resolved = (y0 - 0.08 * dy, y1 + 0.08 * dy) if ylim is None else (float(ylim[0]), float(ylim[1]))
+    return xlim_resolved, ylim_resolved
+
+
 def lda(
     X,
     y,
@@ -362,6 +500,8 @@ def plot_lda_boundary_segments(
     ylim=None,
     ax=None,
     line_kwargs=None,
+    projection="auto",
+    projection_matrix=None,
 ):
     """Plot only valid analytical LDA boundary segments for 2-D models.
 
@@ -382,14 +522,22 @@ def plot_lda_boundary_segments(
         prior,
         classes,
     )
-    if means.ndim != 2 or means.shape[1] != 2:
-        raise ValueError("plot_lda_boundary_segments requires means with shape (n_classes, 2)")
-    if covariance.shape != (2, 2):
-        raise ValueError("plot_lda_boundary_segments requires a 2x2 covariance matrix")
+    if means.ndim != 2:
+        raise ValueError("means must have shape (n_classes, n_features)")
+    if covariance.shape != (means.shape[1], means.shape[1]):
+        raise ValueError("covariance must have shape (n_features, n_features)")
     if prior.shape != (means.shape[0],):
         raise ValueError("prior must have one value per class")
     if classes.shape[0] != means.shape[0]:
         raise ValueError("classes must have one label per class mean")
+
+    means, covariance, _ = _project_lda_to_2d(
+        means,
+        covariance,
+        prior,
+        projection=projection,
+        projection_matrix=projection_matrix,
+    )
 
     if ax is None:
         _, ax = plt.subplots()
@@ -470,6 +618,18 @@ def plot_lda_regions(
     draw_segments=True,
     line_kwargs=None,
     class_colors=None,
+    projection="auto",
+    projection_matrix=None,
+    train_X=None,
+    train_y=None,
+    test_X=None,
+    test_y=None,
+    train_marker="o",
+    test_marker="x",
+    train_size=18,
+    test_size=30,
+    train_alpha=0.45,
+    test_alpha=0.9,
 ):
     """Plot 2-D LDA decision regions with optional analytical segment overlays.
 
@@ -493,20 +653,25 @@ def plot_lda_regions(
         classes,
     )
 
-    if means.ndim != 2 or means.shape[1] != 2:
-        raise ValueError("plot_lda_regions requires means with shape (n_classes, 2)")
-    if covariance.shape != (2, 2):
-        raise ValueError("plot_lda_regions requires a 2x2 covariance matrix")
+    if means.ndim != 2:
+        raise ValueError("means must have shape (n_classes, n_features)")
+    if covariance.shape != (means.shape[1], means.shape[1]):
+        raise ValueError("covariance must have shape (n_features, n_features)")
     if prior.shape != (means.shape[0],):
         raise ValueError("prior must have one value per class")
+
+    means, covariance, proj = _project_lda_to_2d(
+        means,
+        covariance,
+        prior,
+        projection=projection,
+        projection_matrix=projection_matrix,
+    )
 
     if ax is None:
         _, ax = plt.subplots()
 
-    if xlim is None:
-        xlim = ax.get_xlim()
-    if ylim is None:
-        ylim = ax.get_ylim()
+    xlim, ylim = _resolve_plot_limits(means, train_X, test_X, proj, xlim, ylim)
 
     log_prior = np.log(np.clip(prior, 1e-300, None))
     w = np.linalg.solve(covariance, means.T).T
@@ -536,7 +701,32 @@ def plot_lda_regions(
             ylim=ylim,
             ax=ax,
             line_kwargs=line_kwargs,
+            projection="auto",
+            projection_matrix=None,
         )
+
+    _scatter_projected_classes(
+        ax,
+        train_X,
+        train_y,
+        classes,
+        projection_matrix=proj,
+        class_colors=class_colors,
+        marker=train_marker,
+        size=float(train_size),
+        alpha=float(train_alpha),
+    )
+    _scatter_projected_classes(
+        ax,
+        test_X,
+        test_y,
+        classes,
+        projection_matrix=proj,
+        class_colors=class_colors,
+        marker=test_marker,
+        size=float(test_size),
+        alpha=float(test_alpha),
+    )
 
     ax.set_xlim(float(xlim[0]), float(xlim[1]))
     ax.set_ylim(float(ylim[0]), float(ylim[1]))
