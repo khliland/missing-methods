@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "missing-methods"
-version = "0.5.1"
+version = "0.5.2"
 description = "NA-aware PCA/PLS/MFA helpers with RV/RV2 similarity scores."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,9 +14,32 @@ authors = [
 ]
 keywords = ["PCA", "PLS", "RBF-PLS", "logistic regression", "RV coefficient", "MFA", "preprocessing", "missing data"]
 license = { text = "MIT" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
 
 [project.urls]
 Home = "https://github.com/khliland/missing-methods"
+Repository = "https://github.com/khliland/missing-methods"
+Issues = "https://github.com/khliland/missing-methods/issues"
 
 [project.optional-dependencies]
 sklearn = ["scikit-learn>=1.5"]
+dev = [
+    "pytest>=8.0",
+    "scikit-learn>=1.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

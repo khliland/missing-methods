@@ -3,55 +3,62 @@
 from __future__ import annotations
 
 import numpy as np
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from .nan_utils import _safe_matvec, _normalize, _scaled_sumsq, _validate_sample_weight
 from .logistic import logistic as _logistic, _masked_effective_matrix, _sigmoid
 from .impute import pca_impute as _pca_impute, _impute_with_loadings
+from .preprocessing import yeo_johnson as _yeo_johnson, box_cox as _box_cox
 from .lda import lda as _lda
 from .qda import qda as _qda
 from .pca_pls import pca as _pca, pls as _pls
 from .kernel import kernel_pls as _kernel_pls, pairwise_rbf
 
-try:
+if TYPE_CHECKING:
     from sklearn.base import BaseEstimator as _BaseEstimator
     from sklearn.base import ClassifierMixin as _ClassifierMixin
     from sklearn.base import RegressorMixin as _RegressorMixin
     from sklearn.base import TransformerMixin as _TransformerMixin
-except ImportError:  # pragma: no cover
-    class _BaseEstimator:
-        def get_params(self, deep=True):
-            return {key: value for key, value in self.__dict__.items() if not key.startswith("_")}
+else:
+    try:
+        from sklearn.base import BaseEstimator as _BaseEstimator
+        from sklearn.base import ClassifierMixin as _ClassifierMixin
+        from sklearn.base import RegressorMixin as _RegressorMixin
+        from sklearn.base import TransformerMixin as _TransformerMixin
+    except ImportError:  # pragma: no cover
+        class _BaseEstimator:
+            def get_params(self, deep=True):
+                return {key: value for key, value in self.__dict__.items() if not key.startswith("_")}
 
-        def set_params(self, **params):
-            for key, value in params.items():
-                setattr(self, key, value)
-            return self
+            def set_params(self, **params):
+                for key, value in params.items():
+                    setattr(self, key, value)
+                return self
 
-    class _TransformerMixin:
-        def fit_transform(self, X, y=None, **fit_params):
-            return self.fit(X, y, **fit_params).transform(X)
+        class _TransformerMixin:
+            def fit_transform(self: Any, X, y=None, **fit_params):
+                return self.fit(X, y, **fit_params).transform(X)
 
-    class _ClassifierMixin:
-        def score(self, X, y, sample_weight=None):
-            y_pred = self.predict(X)
-            y = np.asarray(y)
-            correct = y_pred == y
-            if sample_weight is None:
-                return np.mean(correct)
-            weights = np.asarray(sample_weight, dtype=float)
-            return np.average(correct, weights=weights)
+        class _ClassifierMixin:
+            def score(self: Any, X, y, sample_weight=None):
+                y_pred = self.predict(X)
+                y = np.asarray(y)
+                correct = y_pred == y
+                if sample_weight is None:
+                    return np.mean(correct)
+                weights = np.asarray(sample_weight, dtype=float)
+                return np.average(correct, weights=weights)
 
-    class _RegressorMixin:
-        def score(self, X, y, sample_weight=None):
-            y_pred = self.predict(X)
-            mask = ~np.isnan(y_pred) & ~np.isnan(y)
-            if not np.any(mask):
-                return np.nan
-            residual = y[mask] - y_pred[mask]
-            ss_res = np.nansum(residual ** 2)
-            ss_tot = np.nansum((y[mask] - np.nanmean(y[mask])) ** 2)
-            return 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
+        class _RegressorMixin:
+            def score(self: Any, X, y, sample_weight=None):
+                y_pred = self.predict(X)
+                mask = ~np.isnan(y_pred) & ~np.isnan(y)
+                if not np.any(mask):
+                    return np.nan
+                residual = y[mask] - y_pred[mask]
+                ss_res = np.nansum(residual ** 2)
+                ss_tot = np.nansum((y[mask] - np.nanmean(y[mask])) ** 2)
+                return 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
 
 
 class PCA(_BaseEstimator, _TransformerMixin):
@@ -318,6 +325,200 @@ class StandardScaler(_BaseEstimator, _TransformerMixin):
     def _validate_fitted(self):
         if not hasattr(self, "scale_"):
             raise ValueError("StandardScaler instance is not fitted yet")
+
+
+class YeoJohnsonTransformer(_BaseEstimator, _TransformerMixin):
+    """NaN-aware Yeo-Johnson power transform in a scikit-learn style API.
+
+    Args:
+        lmbda: Optional fixed lambda value. If None, fit learns one lambda per feature.
+
+    Example:
+        >>> import numpy as np
+        >>> from missing_methods.sk import YeoJohnsonTransformer
+        >>> X = np.array([[1.0, -2.0], [2.0, np.nan], [3.0, 1.0]])
+        >>> tr = YeoJohnsonTransformer()
+        >>> Xt = tr.fit_transform(X)
+        >>> Xr = tr.inverse_transform(Xt)
+        >>> np.allclose(Xr, X, equal_nan=True)
+        True
+    """
+
+    def __init__(self, lmbda=None):
+        self.lmbda = lmbda
+
+    def fit(self, arr: np.ndarray, y=None, sample_weight=None):
+        arr = np.asarray(arr, dtype=float)
+        if arr.ndim == 1:
+            n_features = 1
+            lmbda_arr = None if self.lmbda is None else np.asarray([self.lmbda], dtype=float)
+        elif arr.ndim == 2:
+            n_features = arr.shape[1]
+            if self.lmbda is None:
+                lmbda_arr = None
+            else:
+                lmbda_arr = np.asarray(self.lmbda, dtype=float).reshape(-1)
+                if lmbda_arr.size not in (1, n_features):
+                    raise ValueError("lmbda must be scalar or shape (n_features,)")
+                if lmbda_arr.size == 1:
+                    lmbda_arr = np.repeat(lmbda_arr, n_features)
+        else:
+            raise ValueError("arr must be 1-D or 2-D")
+
+        _, fitted = _yeo_johnson(
+            arr,
+            lambdas=lmbda_arr,
+            sample_weight=sample_weight,
+            return_lambdas=True,
+        )
+        self.lambdas_ = np.asarray(fitted, dtype=float)
+        self.n_features_in_ = n_features
+        return self
+
+    def transform(self, arr: np.ndarray) -> np.ndarray:
+        self._validate_fitted()
+        arr = np.asarray(arr, dtype=float)
+        if arr.ndim == 2 and arr.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"arr has {arr.shape[1]} features but the fitted transformer expects {self.n_features_in_}"
+            )
+        transformed = _yeo_johnson(arr, lambdas=self.lambdas_)
+        if isinstance(transformed, tuple):  # pragma: no cover
+            return transformed[0]
+        return transformed
+
+    def inverse_transform(self, arr: np.ndarray) -> np.ndarray:
+        self._validate_fitted()
+        arr = np.asarray(arr, dtype=float)
+        was_1d = arr.ndim == 1
+        arr2d = arr[:, np.newaxis] if was_1d else arr
+        if arr2d.ndim != 2:
+            raise ValueError("arr must be 1-D or 2-D")
+        if arr2d.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"arr has {arr2d.shape[1]} features but the fitted transformer expects {self.n_features_in_}"
+            )
+
+        out = arr2d.copy()
+        for col in range(out.shape[1]):
+            lmbda = float(self.lambdas_[col])
+            y_col = out[:, col]
+            observed = ~np.isnan(y_col)
+            if not np.any(observed):
+                continue
+            y_obs = y_col[observed]
+            x_obs = np.empty_like(y_obs)
+            pos = y_obs >= 0
+            if np.isclose(lmbda, 0.0):
+                x_obs[pos] = np.expm1(y_obs[pos])
+            else:
+                x_obs[pos] = np.power(lmbda * y_obs[pos] + 1.0, 1.0 / lmbda) - 1.0
+
+            neg = ~pos
+            if np.isclose(lmbda, 2.0):
+                x_obs[neg] = 1.0 - np.exp(-y_obs[neg])
+            else:
+                x_obs[neg] = 1.0 - np.power(1.0 - (2.0 - lmbda) * y_obs[neg], 1.0 / (2.0 - lmbda))
+            y_col[observed] = x_obs
+
+        if was_1d:
+            return out[:, 0]
+        return out
+
+    def _validate_fitted(self):
+        if not hasattr(self, "lambdas_"):
+            raise ValueError("YeoJohnsonTransformer instance is not fitted yet")
+
+
+class BoxCoxTransformer(_BaseEstimator, _TransformerMixin):
+    """NaN-aware Box-Cox power transform in a scikit-learn style API.
+
+    Args:
+        lmbda: Optional fixed lambda value. If None, fit learns one lambda per feature.
+
+    Note:
+        Box-Cox requires strictly positive observed values.
+    """
+
+    def __init__(self, lmbda=None):
+        self.lmbda = lmbda
+
+    def fit(self, arr: np.ndarray, y=None, sample_weight=None):
+        arr = np.asarray(arr, dtype=float)
+        if arr.ndim == 1:
+            n_features = 1
+            lmbda_arr = None if self.lmbda is None else np.asarray([self.lmbda], dtype=float)
+        elif arr.ndim == 2:
+            n_features = arr.shape[1]
+            if self.lmbda is None:
+                lmbda_arr = None
+            else:
+                lmbda_arr = np.asarray(self.lmbda, dtype=float).reshape(-1)
+                if lmbda_arr.size not in (1, n_features):
+                    raise ValueError("lmbda must be scalar or shape (n_features,)")
+                if lmbda_arr.size == 1:
+                    lmbda_arr = np.repeat(lmbda_arr, n_features)
+        else:
+            raise ValueError("arr must be 1-D or 2-D")
+
+        _, fitted = _box_cox(
+            arr,
+            lambdas=lmbda_arr,
+            sample_weight=sample_weight,
+            return_lambdas=True,
+        )
+        self.lambdas_ = np.asarray(fitted, dtype=float)
+        self.n_features_in_ = n_features
+        return self
+
+    def transform(self, arr: np.ndarray) -> np.ndarray:
+        self._validate_fitted()
+        arr = np.asarray(arr, dtype=float)
+        if arr.ndim == 2 and arr.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"arr has {arr.shape[1]} features but the fitted transformer expects {self.n_features_in_}"
+            )
+        transformed = _box_cox(arr, lambdas=self.lambdas_)
+        if isinstance(transformed, tuple):  # pragma: no cover
+            return transformed[0]
+        return transformed
+
+    def inverse_transform(self, arr: np.ndarray) -> np.ndarray:
+        self._validate_fitted()
+        arr = np.asarray(arr, dtype=float)
+        was_1d = arr.ndim == 1
+        arr2d = arr[:, np.newaxis] if was_1d else arr
+        if arr2d.ndim != 2:
+            raise ValueError("arr must be 1-D or 2-D")
+        if arr2d.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"arr has {arr2d.shape[1]} features but the fitted transformer expects {self.n_features_in_}"
+            )
+
+        out = arr2d.copy()
+        for col in range(out.shape[1]):
+            lmbda = float(self.lambdas_[col])
+            y_col = out[:, col]
+            observed = ~np.isnan(y_col)
+            if not np.any(observed):
+                continue
+            y_obs = y_col[observed]
+            if np.isclose(lmbda, 0.0):
+                x_obs = np.exp(y_obs)
+            else:
+                base = lmbda * y_obs + 1.0
+                if np.any(base <= 0.0):
+                    raise ValueError("inverse Box-Cox is undefined for values where lambda * x + 1 <= 0")
+                x_obs = np.power(base, 1.0 / lmbda)
+            y_col[observed] = x_obs
+
+        if was_1d:
+            return out[:, 0]
+        return out
+
+    def _validate_fitted(self):
+        if not hasattr(self, "lambdas_"):
+            raise ValueError("BoxCoxTransformer instance is not fitted yet")
 
 
 class KernelPLSRegressor(_BaseEstimator, _RegressorMixin):
@@ -778,6 +979,8 @@ __all__ = [
     "QDAClassifier",
     "Normalizer",
     "StandardScaler",
+    "YeoJohnsonTransformer",
+    "BoxCoxTransformer",
     "pca",
     "pls",
     "logistic",

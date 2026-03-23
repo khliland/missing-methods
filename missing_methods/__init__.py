@@ -3,7 +3,7 @@
 from .mfa import mfa
 from .pca_pls import pca, pls
 from .rv import rv, rv2, rv_list, rv2_list
-from .preprocessing import standardize, normalize
+from .preprocessing import standardize, normalize, yeo_johnson, box_cox
 from .assessment import missingness_recommendations
 from .kernel import kernel_pls
 from .logistic import logistic
@@ -22,6 +22,8 @@ __all__ = [
 	"mfa",
 	"standardize",
 	"normalize",
+	"yeo_johnson",
+	"box_cox",
 	"missingness_recommendations",
 	"kernel_pls",
 	"logistic",

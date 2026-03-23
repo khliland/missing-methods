@@ -15,7 +15,11 @@ Included methods are grouped as:
 - Similarity metrics:  
 	RV and RV2 coefficients (`rv`, `rv2`, `rv_list`, `rv2_list`)
 - Preprocessing utilities:  
-	functional helpers (`normalize`, `standardize`) and scikit-style transformers (`Normalizer`, `StandardScaler`)
+	functional helpers (`normalize`, `standardize`, `yeo_johnson`, `box_cox`)
+- Scikit-style preprocessing:  
+	`PCAImputer`, `Normalizer`, `StandardScaler`, `YeoJohnsonTransformer`, and `BoxCoxTransformer`
+- Scikit-style estimators:  
+	`PCA`, `PLSRegressor`, `KernelPLSRegressor`, `LogisticClassifier`, `LDAClassifier`, and `QDAClassifier`
 
 Minimal examples of all implemented methods are found in `examples/examples.ipynb`, while more elaborate examples are found in `examples/kernel_pls.ipynb` and `examples/UCI_wine.ipynb`.
 
@@ -53,6 +57,16 @@ print("RV", mm.rv(X, Y))
 sample_weight = np.array([1.0, 0.75, 1.25])
 weighted_pls = mm.pls(X, Y, ncomp=2, sample_weight=sample_weight)
 weighted_rv = mm.rv(X, Y, sample_weight=sample_weight)
+
+X_signed = np.array([[1.0, -2.0], [2.5, np.nan], [3.2, 0.3]])
+X_signed_t, yj_lambdas = mm.yeo_johnson(X_signed, return_lambdas=True)
+X_signed_new = np.array([[1.4, -1.0], [np.nan, 0.7]])
+X_signed_new_t = mm.yeo_johnson(X_signed_new, lambdas=yj_lambdas)
+
+X_pos = np.array([[1.0, 2.0], [1.8, np.nan], [3.1, 4.2]])
+X_pos_t, bc_lambdas = mm.box_cox(X_pos, return_lambdas=True)
+X_pos_new = np.array([[1.2, 2.4], [np.nan, 5.5]])
+X_pos_new_t = mm.box_cox(X_pos_new, lambdas=bc_lambdas)
 
 X_class = np.array([[1.2, 0.1], [0.8, np.nan], [-1.1, -0.2], [-0.9, -0.4]])
 y_class = np.array([1, 1, 0, 0])
@@ -95,11 +109,12 @@ All methods internally scale sums-of-squares and inner products by the proportio
 
 ## Scikit-learn wrappers
 
-For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style estimators that delegate to the functional helpers while keeping the MCAR scaling. It now re-exports `KernelPLSRegressor`, `PCAImputer`, `LogisticClassifier`, `LDAClassifier`, `QDAClassifier`, and the preprocessing transformers so you can drop the MCAR-aware models and scalers into `Pipeline`s alongside `PCA`/`PLS`.
+For users that prefer estimator classes, `missing_methods.sk` exposes scikit-learn-style wrappers that delegate to the functional helpers while keeping the MCAR scaling. On the preprocessing side this includes `PCAImputer`, `Normalizer`, `StandardScaler`, `YeoJohnsonTransformer`, and `BoxCoxTransformer`; on the modeling side it includes `PCA`, `PLSRegressor`, `KernelPLSRegressor`, `LogisticClassifier`, `LDAClassifier`, and `QDAClassifier`.
 
 ```python
-from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, PCAImputer, LogisticClassifier, LDAClassifier, QDAClassifier, Normalizer, StandardScaler
+from missing_methods.sk import PCA, PLSRegressor, KernelPLSRegressor, PCAImputer, LogisticClassifier, LDAClassifier, QDAClassifier, Normalizer, StandardScaler, YeoJohnsonTransformer, BoxCoxTransformer
 import numpy as np
+from sklearn.pipeline import Pipeline
 
 X = np.array([[2.5, 2.4], [0.5, 0.7], [2.2, 2.9]])
 Y = np.array([[2.4, 2.9], [0.6, 0.5], [2.1, 2.2]])
@@ -149,4 +164,15 @@ normalizer = Normalizer()
 normalized = normalizer.fit_transform(X)
 scaler = StandardScaler()
 scaled = scaler.fit_transform(X)
+
+power = YeoJohnsonTransformer()
+X_power = power.fit_transform(X_class)
+X_back = power.inverse_transform(X_power)
+
+positive_pipeline = Pipeline([
+	("boxcox", BoxCoxTransformer()),
+	("scale", StandardScaler()),
+])
+X_positive = np.array([[1.0, 2.0], [1.5, 3.0], [2.5, np.nan]])
+X_positive_t = positive_pipeline.fit_transform(X_positive)
 ```
